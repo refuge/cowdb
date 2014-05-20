@@ -64,7 +64,7 @@ open(Filepath, Options) ->
         ignore ->
             % get the error
             receive
-                {Ref, Pid, {error, Reason} = Error} ->
+                {Ref, Pid, {error, _Reason} = Error} ->
                     case process_info(self(), trap_exit) of
                         {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
                         {trap_exit, false} -> ok
