@@ -22,7 +22,7 @@ Fetch the source code:
 
 Build the source, run the `make command`. It will fetch any needed
 dependencies.
-    
+
     $ cd /<PATH_TO>/cbt
     $ make
 
@@ -30,4 +30,4 @@ dependencies.
 
 Run the following command line:
 
-    $ make cbt
+    $ make test
