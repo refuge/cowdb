@@ -25,9 +25,6 @@ deps:
 doc: dev
 	$(REBAR) -C rebar_dev.config doc skip_deps=true
 
-check: test
-
-
 cover: dev
 	COVER=1 prove t/*.t
 	@$(ERL) -detached -noshell -eval 'etap_report:create()' -s init stop

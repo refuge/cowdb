@@ -40,6 +40,12 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
 
+-ifdef(DEBUG).
+-define(log(Fmt,Args), io:format(Fmt, Args)).
+-else.
+-define(log(Fmt,Args), ok).
+-endif.
+
 %%----------------------------------------------------------------------
 %% Args:   Valid Options are [create] and [create,overwrite].
 %%  Files are opened in read/write mode.
@@ -52,30 +58,25 @@ open(Filepath) ->
 
 open(Filepath, Options) ->
     case gen_server:start_link(cbt_file,
-            {Filepath, Options, self(), Ref = make_ref()}, []) of
-    {ok, Fd} ->
-        {ok, Fd};
-    ignore ->
-        % get the error
-        receive
-        {Ref, Pid, {error, Reason} = Error} ->
-            case process_info(self(), trap_exit) of
-            {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
-            {trap_exit, false} -> ok
-            end,
-            case {lists:member(nologifmissing, Options), Reason} of
-            {true, enoent} -> ok;
-            _ ->
-            lager:error("Could not open file ~s: ~s",
-                [Filepath, file:format_error(Reason)])
-            end,
+                               {Filepath, Options, self(), Ref = make_ref()}, []) of
+        {ok, Fd} ->
+            {ok, Fd};
+        ignore ->
+            % get the error
+            receive
+                {Ref, Pid, {error, Reason} = Error} ->
+                    case process_info(self(), trap_exit) of
+                        {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
+                        {trap_exit, false} -> ok
+                    end,
+
+                    Error
+            end;
+        Error ->
+            % We can't say much here, because it could be any kind of error.
+            % Just let it bubble and an encapsulating subcomponent can perhaps
+            % be more informative. It will likely appear in the SASL log, anyway.
             Error
-        end;
-    Error ->
-        % We can't say much here, because it could be any kind of error.
-        % Just let it bubble and an encapsulating subcomponent can perhaps
-        % be more informative. It will likely appear in the SASL log, anyway.
-        Error
     end.
 
 %%----------------------------------------------------------------------
@@ -160,8 +161,8 @@ pread_iolist(Fd, Pos) ->
         Md5 ->
             {ok, IoList};
         _ ->
-            lager:emergency("File corruption in ~p at position ~B",
-                     [Fd, Pos]),
+            error_logger:info_msg("File corruption in ~p at position ~B",
+                                  [Fd, Pos]),
             exit({file_corruption, <<"file corruption">>})
         end;
     Error ->
