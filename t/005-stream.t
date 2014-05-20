@@ -30,7 +30,7 @@ read_all(Fd, PosList) ->
     iolist_to_binary(Data).
 
 test() ->
-    {ok, Fd} = cbt_file:open(test_util:build_file("test/etap/temp.050"),
+    {ok, Fd} = cbt_file:open(test_util:build_file("t/temp.050"),
                                [create,overwrite]),
     {ok, Stream} = cbt_stream:open(Fd),
 
