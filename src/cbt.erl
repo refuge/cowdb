@@ -173,8 +173,8 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #db{fd=Fd, updater_pid=UpdaterPid}) ->
+    ok = cbt_updater:stop(UpdaterPid),
     cbt_file:close(Fd),
-    cbt_updater:stop(UpdaterPid),
     ok.
 
 %% UTILS fonctions
