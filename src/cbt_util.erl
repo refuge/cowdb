@@ -129,20 +129,25 @@ decodeBase64Url(Url64) ->
     Padding = lists:duplicate((4 - iolist_size(Url2) rem 4) rem 4, $=),
     base64:decode(iolist_to_binary([Url2, Padding])).
 
--spec md5(Data::(iolist() | binary())) -> Digest::binary().
+-type hash() :: 'md4' | 'md5' | 'ripemd160' | 'sha' | 'sha224' | 'sha256' | 'sha384' | 'sha512'.
+-type hash_ctx() :: {hash(), binary()}.
+-type hash_data() :: binary() | maybe_improper_list(binary() |
+    maybe_improper_list(any(), binary() | []) | byte(), binary() | []).
+
+-spec md5(Data::hash_data()) -> Digest::binary().
 md5(Data) ->
     ?MD5(Data).
 
--spec md5_init() -> Context::binary().
+-spec md5_init() -> Context::hash_ctx().
 md5_init() ->
     ?MD5_INIT().
 
--spec md5_update(Context::binary(), Data::(iolist() | binary())) ->
-    NewContext::binary().
+-spec md5_update(Context::hash_ctx(), Data::hash_data()) ->
+    NewContext::hash_ctx().
 md5_update(Ctx, D) ->
    ?MD5_UPDATE(Ctx, D).
 
--spec md5_final(Context::binary()) -> Digest::binary().
+-spec md5_final(Context::hash_ctx()) -> Digest::binary().
 md5_final(Ctx) ->
     ?MD5_FINAL(Ctx).
 

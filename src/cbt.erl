@@ -60,7 +60,7 @@ open(Dir, BtreeSpecs, Opts) ->
     -> {ok, cdb()} | ignore | {error, term()}.
 open(Name, Dir, BtreeSpecs, Opts) ->
     ok = start_app(),
-    SpawnOpt = cbt:get_opt(spawn_opt, Opts, []),
+    SpawnOpt = cbt_util:get_opt(spawn_opt, Opts, []),
     gen_server:start(Name, ?MODULE, [Dir, BtreeSpecs, Opts], [{spawn_opt,SpawnOpt}]).
 
 %% @doc
@@ -79,7 +79,7 @@ open_link(Dir, BtreeSpecs) ->
     -> {ok, cdb()} | ignore | {error, term()}.
 open_link(Dir, BtreeSpecs, Opts) ->
     ok = start_app(),
-    SpawnOpt = cbt:get_opt(spawn_opt, Opts, []),
+    SpawnOpt = cbt_util:get_opt(spawn_opt, Opts, []),
     gen_server:start_link(?MODULE, [Dir, BtreeSpecs, Opts],
                           [{spawn_opt,SpawnOpt}]).
 

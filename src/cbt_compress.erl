@@ -13,7 +13,6 @@
 -module(cbt_compress).
 
 -export([compress/2, decompress/1, is_compressed/2]).
--export([get_compression_method/0]).
 
 -include("cbt.hrl").
 
@@ -24,9 +23,6 @@
 -define(TERM_PREFIX, 131).
 -define(COMPRESSED_TERM_PREFIX, 131, 80).
 
-
-get_compression_method() ->
-    cbt_app:get_env(file_compression, ?DEFAULT_COMPRESSION).
 
 compress(<<?SNAPPY_PREFIX, _/binary>> = Bin, snappy) ->
     Bin;
