@@ -20,6 +20,7 @@
 -export([reorder_results/2]).
 -export([ensure_all_started/1, ensure_all_started/2]).
 -export([uniqid/0]).
+-export([get_opt/2, get_opt/3]).
 
 -ifdef(crypto_compat).
 -define(MD5(Data), crypto:md5(Data)).
@@ -154,3 +155,20 @@ reorder_results(Keys, SortedResults) ->
 
 uniqid() ->
     integer_to_list(erlang:phash2(make_ref())).
+
+
+get_opt(Key, Opts) ->
+    get_opt(Key, Opts, undefined).
+
+get_opt(Key, Opts, Default) ->
+    case proplists:get_value(Key, Opts) of
+        undefined ->
+            case application:get_env(?MODULE, Key) of
+                {ok, Value} -> Value;
+                undefined -> Default
+            end;
+        Value ->
+            Value
+    end.
+
+

@@ -23,7 +23,7 @@
     end).
 
 
--define(LATEST_DISK_VERSION, 6).
+-define(LATEST_DISK_VERSION, 1).
 
 -record(btree, {
     fd,
@@ -36,3 +36,17 @@
     chunk_threshold = 16#4ff
 }).
 
+
+-record(db_header, {version = ?LATEST_DISK_VERSION,
+                    changes = 0,
+                    btrees = [],
+                    meta = []}).
+
+-record(db, {db_pid,
+             updater_pid,
+             fd,
+             btrees = [],
+             header,
+             dir,
+             options,
+             fsync_options}).
