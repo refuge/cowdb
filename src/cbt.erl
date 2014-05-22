@@ -96,7 +96,7 @@ open_link(Name, Dir, BtreeSpecs, Opts) ->
                           [{spawn_opt,SpawnOpt}]).
 
 %% @doc
-%% Close a Hanoi data store.
+%% Close a cdb data store.
 - spec close(Ref::pid()) -> ok.
 close(Ref) ->
     try
