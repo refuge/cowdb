@@ -34,7 +34,7 @@
 
 -type config_options() :: [config_option()].
 
--type btree_spec() :: {term(), list()}.
+-type btree_spec() :: {BtreeId::term(), BtreeOptions::list()}.
 
 
 %% @doc
