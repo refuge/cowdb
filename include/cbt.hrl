@@ -48,5 +48,6 @@
              btrees = [],
              header,
              dir,
+             btree_specs = [],
              options,
              fsync_options}).

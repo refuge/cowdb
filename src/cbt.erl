@@ -137,8 +137,38 @@ handle_call(close, _From, Db) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+
+handle_info({'EXIT', _Pid, normal}, Db) ->
+    {noreply, Db};
+
+handle_info({'EXIT', Fd, Reason}, #db{fd=Fd}=Db) ->
+    error_logger:error_msg("file crashed with reason ~p~n",
+                           [Reason]),
+    {stop, {error, Reason}, Db};
+
+handle_info({'EXIT', Pid, Reason}, #db{updater_pid=Pid}=Db) ->
+    error_logger:error_msg("updater pid crashed with reason ~p~n",
+                           [Reason]),
+
+    #db{fd=Fd,
+        dir=Dir,
+        btree_specs=BtreeSpecs,
+        options=Options} = Db,
+
+
+    case cbt_updater:start_link(self(), Fd, Dir, BtreeSpecs, Options) of
+        {ok, UpdaterPid} ->
+            NewDb = cbt_updater:get_state(UpdaterPid),
+            {noreply, NewDb};
+        Error ->
+            {stop, Error, Db}
+    end;
+
+
+
 handle_info(_Msg, State) ->
     {noreply, State}.
+
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
