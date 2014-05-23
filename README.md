@@ -39,3 +39,10 @@ Run the following command line:
 
 and open the `index.html` file in the doc folder. Or read it
 [online](http://refugeio.bitbucket.org/cbt/index.html).
+
+
+## contribute
+
+Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/CBT
+).
+Code is available on [bitbucket](https://bitbucket.org/refugeio/cbt).
