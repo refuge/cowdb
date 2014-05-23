@@ -12,34 +12,84 @@
 
 -module(cbt_btree).
 
--export([open/2, open/3, query_modify/4, add/2, add_remove/3]).
--export([fold/4, full_reduce/1, final_reduce/2, size/1, foldl/3, foldl/4]).
--export([fold_reduce/4, lookup/2, get_state/1, set_options/2]).
+-export([new/1]).
+-export([open/2, open/3]).
+-export([query_modify/4, add/2, add_remove/3]).
+-export([lookup/2]).
+-export([fold/3, fold/4]).
+-export([fold_reduce/4, full_reduce/1, final_reduce/2]).
+-export([size/1]).
+-export([get_state/1]).
+-export([set_options/2]).
 -export([less/3]).
 
 -include("cbt.hrl").
 
 -define(CHUNK_THRESHOLD, 16#4ff).
 
-extract(#btree{extract_kv=undefined}, Value) ->
-    Value;
-extract(#btree{extract_kv=Extract}, Value) ->
-    Extract(Value).
+-type cbtree() :: #btree{}.
+-type cbtree_options() :: [{split, fun()} | {join, fun()} | {less, fun()}
+                        | {reduce, fun()}
+                        | {compression, cbt_compress:compression_method()}
+                        | {chunk_threshold, integer()}].
 
-assemble(#btree{assemble_kv=undefined}, Key, Value) ->
-    {Key, Value};
-assemble(#btree{assemble_kv=Assemble}, Key, Value) ->
-    Assemble(Key, Value).
+-type cbt_kv() :: {Key::term(), Val::term()}.
+-type cbt_kvs() :: [cbt_kv()].
+-type cbt_keys() :: [term()].
 
-less(#btree{less=undefined}, A, B) ->
-    A < B;
-less(#btree{less=Less}, A, B) ->
-    Less(A, B).
+-type cbt_fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
+                             {end_key, term()} | {end_key_gt, term()} |
+                             {key_group_fun, fun()}].
 
+-export_type([cbtree/0]).
+-export_type([cbtree_options/0]).
+-export_type([cbt_kv/0, cbt_kvs/0]).
+-export_type([cbt_keys/0]).
+-export_type([cbt_fold_options/0]).
+
+%% @doc create a new btree
+-spec new(Fd::cbt_file:cbt_file()) -> {ok, cbtree()}.
+new(Fd) ->
+    open(nil, Fd).
+
+%% @doc open a btree from the file.
 % pass in 'nil' for State if a new Btree.
+-spec open(State::nil | cbtree(), Fd::cbt_file:cbt_file()) -> {ok, cbtree()}.
 open(State, Fd) ->
     {ok, #btree{root=State, fd=Fd}}.
 
+
+%% @doc open a btree from the file.
+%% pass in 'nil' for State if a new Btree.
+%% Options:
+%% <ul>
+%% <li> {split, fun(Btree, Value)} : Take a value and extract content if
+%% needed from it. It returns a {key, Value} tuple. You don't need to
+%% set such function if you already give a {Key, Value} tuple to your
+%% add/add_remove functions.</li>
+%% <li>{join, fun(Key, Value)} : The fonction takes the key and value and
+%% return a new Value ussed when you lookup. By default it return a
+%% {Key, Value} .</li>
+%% <li>{reduce_fun, ReduceFun} : pass the reduce fun</li>
+%% <li> {compression, nonde | snappy}: the compression methods used to
+%% compress the data</li>
+%% <li>{less, LessFun(KeyA, KeyB)}: function used to order the btree that
+%% compare two keys</li>
+%% </ul>
+-spec open(State::nil | cbtree(), Fd::cbt_file:cbt_file(),
+           Options::cbtree_options()) -> {ok, cbtree()}.
+open(State, Fd, Options) ->
+    {ok, set_options(#btree{root=State, fd=Fd}, Options)}.
+
+
+%% @doc return the latest btree root that will be stored in the database
+%% header or value
+-spec get_state(Btree::cbtree()) -> State::tuple().
+get_state(#btree{root=Root}) ->
+    Root.
+
+%% @doc set btreee options
+-spec set_options(Btree::cbtree(), Options::cbtree_options()) -> Btree2::cbtree().
 set_options(Bt, []) ->
     Bt;
 set_options(Bt, [{split, Extract}|Rest]) ->
@@ -55,12 +105,127 @@ set_options(Bt, [{compression, Comp}|Rest]) ->
 set_options(Bt, [{chunk_threshold, Threshold}|Rest]) ->
     set_options(Bt#btree{chunk_threshold = Threshold}, Rest).
 
-open(State, Fd, Options) ->
-    {ok, set_options(#btree{root=State, fd=Fd}, Options)}.
 
-get_state(#btree{root=Root}) ->
-    Root.
+%% @doc return the size in bytes of a btree
+-spec size(Btree::cbtree()) -> Size::integer().
+size(#btree{root = nil}) ->
+    0;
+size(#btree{root = {_P, _Red, Size}}) ->
+    Size.
 
+
+%% --------------------------------
+%% Btree  updates methods
+%% --------------------------------
+
+%% @doc insert a list of key/values in the btree
+-spec add(Btree::cbtree(), InsertKeyValues::cbt_kvs()) ->
+    {ok, Btree2::cbtree()}.
+add(Bt, InsertKeyValues) ->
+    add_remove(Bt, InsertKeyValues, []).
+
+%% @doc insert and remove a list of key/values in the btree in one
+%% write.
+-spec add_remove(Btree::cbtree(), InsertKeyValues::cbt_kvs(),
+          RemoveKeys::cbtree()) -> {ok, Btree2::cbtree()}.
+add_remove(Bt, InsertKeyValues, RemoveKeys) ->
+    {ok, [], Bt2} = query_modify(Bt, [], InsertKeyValues, RemoveKeys),
+    {ok, Bt2}.
+
+%% @doc insert and remove a list of key/values and retrieve a list of
+%% key/values from their key in the btree in one call.
+-spec query_modify(Btree::cbtree(), LookupKeys::cbt_keys(),
+                   InsertKeyValues::cbt_kvs(), RemoveKeys::cbtree()) ->
+    {ok, FoundKeyValues::cbt_kvs(), Btree2::cbtree()}.
+query_modify(Bt, LookupKeys, InsertValues, RemoveKeys) ->
+    #btree{root=Root} = Bt,
+    InsertActions = lists:map(
+        fun(KeyValue) ->
+            {Key, Value} = extract(Bt, KeyValue),
+            {insert, Key, Value}
+        end, InsertValues),
+    RemoveActions = [{remove, Key, nil} || Key <- RemoveKeys],
+    FetchActions = [{fetch, Key, nil} || Key <- LookupKeys],
+    SortFun =
+        fun({OpA, A, _}, {OpB, B, _}) ->
+            case A == B of
+            % A and B are equal, sort by op.
+            true -> op_order(OpA) < op_order(OpB);
+            false ->
+                less(Bt, A, B)
+            end
+        end,
+    Actions = lists:sort(SortFun, lists:append([InsertActions, RemoveActions, FetchActions])),
+    {ok, KeyPointers, QueryResults} = modify_node(Bt, Root, Actions, []),
+    {ok, NewRoot} = complete_root(Bt, KeyPointers),
+    {ok, QueryResults, Bt#btree{root=NewRoot}}.
+
+
+%% --------------------------------
+%% Btree query methods
+%% --------------------------------
+
+%% @doc lookup for a list of keys in the btree
+%% Results are returned in the same order as the keys. If the key is
+%% not_found the `not_found' result is appended to the list.
+-spec lookup(Btree::cbtree(), Keys::cbt_keys()) -> [{ok, cbt_kv()} | not_found].
+lookup(#btree{root=Root, less=Less}=Bt, Keys) ->
+    SortedKeys = case Less of
+        undefined -> lists:sort(Keys);
+        _ -> lists:sort(Less, Keys)
+    end,
+    {ok, SortedResults} = lookup(Bt, Root, SortedKeys),
+    % We want to return the results in the same order as the keys were input
+    % but we may have changed the order when we sorted. So we need to put the
+    % order back into the results.
+    cbt_util:reorder_results(Keys, SortedResults).
+
+lookup(_Bt, nil, Keys) ->
+    {ok, [{Key, not_found} || Key <- Keys]};
+lookup(Bt, Node, Keys) ->
+    Pointer = element(1, Node),
+    {NodeType, NodeList} = get_node(Bt, Pointer),
+    case NodeType of
+    kp_node ->
+        lookup_kpnode(Bt, list_to_tuple(NodeList), 1, Keys, []);
+    kv_node ->
+        lookup_kvnode(Bt, list_to_tuple(NodeList), 1, Keys, [])
+    end.
+
+%% @doc fold key/values in the btree
+-spec fold(Btree::cbtree(), Fun::fun(), Acc::term()) ->
+    {ok, {KVs::cbt_kvs(), Reductions::[term()]}, Acc2::term()}.
+fold(Bt, Fun, Acc) ->
+    fold(Bt, Fun, Acc, []).
+
+-spec fold(Btree::cbtree(), Fun::fun(), Acc::term(),
+           Options::cbt_fold_options()) ->
+    {ok, {KVs::cbt_kvs(), Reductions::[term()]}, Acc2::term()}.
+fold(#btree{root=nil}, _Fun, Acc, _Options) ->
+    {ok, {[], []}, Acc};
+fold(#btree{root=Root}=Bt, Fun, Acc, Options) ->
+    Dir = cbt_util:get_value(dir, Options, fwd),
+    InRange = make_key_in_end_range_function(Bt, Dir, Options),
+    Result =
+    case cbt_util:get_value(start_key, Options) of
+    undefined ->
+        stream_node(Bt, [], Bt#btree.root, InRange, Dir,
+                convert_fun_arity(Fun), Acc);
+    StartKey ->
+        stream_node(Bt, [], Bt#btree.root, StartKey, InRange, Dir,
+                convert_fun_arity(Fun), Acc)
+    end,
+    case Result of
+    {ok, Acc2}->
+        FullReduction = element(2, Root),
+        {ok, {[], [FullReduction]}, Acc2};
+    {stop, LastReduction, Acc2} ->
+        {ok, LastReduction, Acc2}
+    end.
+
+
+%% @doc apply the reduce function on last reductions.
+-spec final_reduce(Btree::cbtree(), LastReduction::[term()]) -> term().
 final_reduce(#btree{reduce=Reduce}, Val) ->
     final_reduce(Reduce, Val);
 final_reduce(Reduce, {[], []}) ->
@@ -73,6 +238,10 @@ final_reduce(Reduce, {KVs, Reductions}) ->
     Red = Reduce(reduce, KVs),
     final_reduce(Reduce, {[], [Red | Reductions]}).
 
+%% @doc fold reduce values.
+%%
+-spec fold_reduce(Btree::cbtree(), FoldFun::fun(), Acc::any(),
+                    Options::cbt_fold_options()) -> {ok, Acc2::term()}.
 fold_reduce(#btree{root=Root}=Bt, Fun, Acc, Options) ->
     Dir = cbt_util:get_value(dir, Options, fwd),
     StartKey = cbt_util:get_value(start_key, Options),
@@ -94,18 +263,34 @@ fold_reduce(#btree{root=Root}=Bt, Fun, Acc, Options) ->
         throw:{stop, AccDone} -> {ok, AccDone}
     end.
 
+%% @doc return the full reduceed value from the btree.
+-spec full_reduce(Btree::cbtree()) -> {ok, term()}.
 full_reduce(#btree{root=nil,reduce=Reduce}) ->
     {ok, Reduce(reduce, [])};
 full_reduce(#btree{root=Root}) ->
     {ok, element(2, Root)}.
 
-size(#btree{root = nil}) ->
-    0;
-size(#btree{root = {_P, _Red}}) ->
-    % pre 1.2 format
-    nil;
-size(#btree{root = {_P, _Red, Size}}) ->
-    Size.
+
+
+extract(#btree{extract_kv=undefined}, Value) ->
+    Value;
+extract(#btree{extract_kv=Extract}, Value) ->
+    Extract(Value).
+
+assemble(#btree{assemble_kv=undefined}, Key, Value) ->
+    {Key, Value};
+assemble(#btree{assemble_kv=Assemble}, Key, Value) ->
+    Assemble(Key, Value).
+
+
+less(#btree{less=undefined}, A, B) ->
+    A < B;
+less(#btree{less=Less}, A, B) ->
+    Less(A, B).
+
+%% ------------------------------------
+%% PRIVATE API
+%% ------------------------------------
 
 % wraps a 2 arity function with the proper 3 arity function
 convert_fun_arity(Fun) when is_function(Fun, 2) ->
@@ -147,64 +332,7 @@ make_key_in_end_range_function(Bt, rev, Options) ->
     end.
 
 
-foldl(Bt, Fun, Acc) ->
-    fold(Bt, Fun, Acc, []).
 
-foldl(Bt, Fun, Acc, Options) ->
-    fold(Bt, Fun, Acc, Options).
-
-
-fold(#btree{root=nil}, _Fun, Acc, _Options) ->
-    {ok, {[], []}, Acc};
-fold(#btree{root=Root}=Bt, Fun, Acc, Options) ->
-    Dir = cbt_util:get_value(dir, Options, fwd),
-    InRange = make_key_in_end_range_function(Bt, Dir, Options),
-    Result =
-    case cbt_util:get_value(start_key, Options) of
-    undefined ->
-        stream_node(Bt, [], Bt#btree.root, InRange, Dir,
-                convert_fun_arity(Fun), Acc);
-    StartKey ->
-        stream_node(Bt, [], Bt#btree.root, StartKey, InRange, Dir,
-                convert_fun_arity(Fun), Acc)
-    end,
-    case Result of
-    {ok, Acc2}->
-        FullReduction = element(2, Root),
-        {ok, {[], [FullReduction]}, Acc2};
-    {stop, LastReduction, Acc2} ->
-        {ok, LastReduction, Acc2}
-    end.
-
-add(Bt, InsertKeyValues) ->
-    add_remove(Bt, InsertKeyValues, []).
-
-add_remove(Bt, InsertKeyValues, RemoveKeys) ->
-    {ok, [], Bt2} = query_modify(Bt, [], InsertKeyValues, RemoveKeys),
-    {ok, Bt2}.
-
-query_modify(Bt, LookupKeys, InsertValues, RemoveKeys) ->
-    #btree{root=Root} = Bt,
-    InsertActions = lists:map(
-        fun(KeyValue) ->
-            {Key, Value} = extract(Bt, KeyValue),
-            {insert, Key, Value}
-        end, InsertValues),
-    RemoveActions = [{remove, Key, nil} || Key <- RemoveKeys],
-    FetchActions = [{fetch, Key, nil} || Key <- LookupKeys],
-    SortFun =
-        fun({OpA, A, _}, {OpB, B, _}) ->
-            case A == B of
-            % A and B are equal, sort by op.
-            true -> op_order(OpA) < op_order(OpB);
-            false ->
-                less(Bt, A, B)
-            end
-        end,
-    Actions = lists:sort(SortFun, lists:append([InsertActions, RemoveActions, FetchActions])),
-    {ok, KeyPointers, QueryResults} = modify_node(Bt, Root, Actions, []),
-    {ok, NewRoot} = complete_root(Bt, KeyPointers),
-    {ok, QueryResults, Bt#btree{root=NewRoot}}.
 
 % for ordering different operations with the same key.
 % fetch < remove < insert
@@ -212,28 +340,6 @@ op_order(fetch) -> 1;
 op_order(remove) -> 2;
 op_order(insert) -> 3.
 
-lookup(#btree{root=Root, less=Less}=Bt, Keys) ->
-    SortedKeys = case Less of
-        undefined -> lists:sort(Keys);
-        _ -> lists:sort(Less, Keys)
-    end,
-    {ok, SortedResults} = lookup(Bt, Root, SortedKeys),
-    % We want to return the results in the same order as the keys were input
-    % but we may have changed the order when we sorted. So we need to put the
-    % order back into the results.
-    cbt_util:reorder_results(Keys, SortedResults).
-
-lookup(_Bt, nil, Keys) ->
-    {ok, [{Key, not_found} || Key <- Keys]};
-lookup(Bt, Node, Keys) ->
-    Pointer = element(1, Node),
-    {NodeType, NodeList} = get_node(Bt, Pointer),
-    case NodeType of
-    kp_node ->
-        lookup_kpnode(Bt, list_to_tuple(NodeList), 1, Keys, []);
-    kv_node ->
-        lookup_kvnode(Bt, list_to_tuple(NodeList), 1, Keys, [])
-    end.
 
 lookup_kpnode(_Bt, _NodeTuple, _LowerBound, [], Output) ->
     {ok, lists:reverse(Output)};

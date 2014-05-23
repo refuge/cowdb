@@ -9,6 +9,10 @@
 % WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 % License for the specific language governing permissions and limitations under
 % the License.
+%
+%
+% @doc module to store a large binary (stream) in the database file and
+% get the list of each chunk
 
 -module(cbt_stream).
 -behaviour(gen_server).
@@ -19,8 +23,8 @@
 -export([copy_to_new_stream/3, write/2]).
 
 % gen_server callbacks
--export([init/1, terminate/2, code_change/3]).
--export([handle_cast/2, handle_call/3, handle_info/2]).
+-export([init/1, terminate/2, code_change/3,
+         handle_cast/2, handle_call/3, handle_info/2]).
 
 -include("cbt.hrl").
 
@@ -42,18 +46,32 @@
     end_encoding_fun
     }).
 
+-type cbt_stream() :: pid().
+-type cbt_stream_options() :: [encoding | {compression_level, integer()}
+                               | {buffer_size, integer()}].
+-export_type([cbt_stream/0]).
 
 %%% Interface functions %%%
 
+%% @doc open a new stream
+-spec open(Fd::cbt_file:cbt_file()) -> {ok, cbt_stream()}.
 open(Fd) ->
     open(Fd, []).
 
+%% @doc open a new stream
+-spec open(Fd::cbt_file:cbt_file(), Options::cbt_stream_options())
+    -> {ok, cbt_stream()}.
 open(Fd, Options) ->
     gen_server:start_link(cbt_stream, {Fd, Options}, []).
 
+%% @doc close the stream
+-spec close(Stream::cbt_stream()) -> ok.
 close(Pid) ->
     gen_server:call(Pid, close, infinity).
 
+%% @doc copy a stream from one file to another
+-spec copy_to_new_stream(Fd::cbt_stream(), PosList::[integer()],
+                         DestFd::cbt_stream()) -> ok | {error, term()}.
 copy_to_new_stream(Fd, PosList, DestFd) ->
     {ok, Dest} = open(DestFd),
     foldl(Fd, PosList,
@@ -62,17 +80,31 @@ copy_to_new_stream(Fd, PosList, DestFd) ->
         end, ok),
     close(Dest).
 
+%% @doc retrieve all chunks from a list of their positions in the file.
+%% Results are passed to a function:
+%%
+%% ```
+%% fun(Chunk, Acc) -> Acc2
+%% '''
+-spec foldl(Fd::cbt_stream(), PosList::[integer()], Fun::fun(), Acc::any()) -> Acc2::any().
 foldl(_Fd, [], _Fun, Acc) ->
     Acc;
 foldl(Fd, [Pos|Rest], Fun, Acc) ->
     {ok, Bin} = cbt_file:pread_iolist(Fd, Pos),
     foldl(Fd, Rest, Fun, Fun(Bin, Acc)).
 
+%% @doc like `fold/4' but check the signature.
+%%
+-spec foldl(Fd::cbt_stream(), PosList::[integer()], Md5::binary(),
+            Fun::fun(), Acc::any()) -> Acc2::any().
 foldl(Fd, PosList, <<>>, Fun, Acc) ->
     foldl(Fd, PosList, Fun, Acc);
 foldl(Fd, PosList, Md5, Fun, Acc) ->
     foldl(Fd, PosList, Md5, cbt_util:md5_init(), Fun, Acc).
 
+%% @doc same as fold but decode the chunk if needed.
+-spec foldl_decode(Fd::cbt_stream(), PosList::[integer()], Md5::binary(),
+       Encoding::gzip | identity, Fun::fun(), Acc::any()) -> Acc2::any().
 foldl_decode(Fd, PosList, Md5, Enc, Fun, Acc) ->
     {DecDataFun, DecEndFun} = case Enc of
     gzip ->
@@ -101,6 +133,11 @@ foldl(Fd, [Pos|Rest], Md5, Md5Acc, Fun, Acc) ->
     {ok, Bin} = cbt_file:pread_iolist(Fd, Pos),
     foldl(Fd, Rest, Md5, cbt_util:md5_update(Md5Acc, Bin), Fun, Fun(Bin, Acc)).
 
+
+%% @doc retrieve all chunks in a range.
+-spec range_foldl(Fd::cbt_stream(), PosList::[integer()],
+                  From::integer(), To::integer(), Fun::fun(), Acc::any())
+    -> Acc2::any().
 range_foldl(Fd, PosList, From, To, Fun, Acc) ->
     range_foldl(Fd, PosList, From, To, 0, Fun, Acc).
 
@@ -190,12 +227,17 @@ identity_enc_dec_funs() ->
         fun() -> [] end
     }.
 
+
+%% @doc write a chunk from the stream on the database file.
+-spec write(Stream::cbt_stream(), Bin::binary()) -> ok | {error, term()}.
 write(_Pid, <<>>) ->
     ok;
 write(Pid, Bin) ->
     gen_server:call(Pid, {write, Bin}, infinity).
 
 
+
+%% @private
 init({Fd, Options}) ->
     {EncodingFun, EndEncodingFun} =
     case cbt_util:get_value(encoding, Options, identity) of
@@ -215,9 +257,11 @@ init({Fd, Options}) ->
         }
     }.
 
+%% @private
 terminate(_Reason, _Stream) ->
     ok.
 
+%% @private
 handle_call({write, Bin}, _From, Stream) ->
     BinSize = iolist_size(Bin),
     #stream{
@@ -288,11 +332,14 @@ handle_call(close, _From, Stream) ->
     end,
     {stop, normal, Result, Stream}.
 
+%% @private
 handle_cast(_Msg, State) ->
     {noreply,State}.
 
+%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% @private
 handle_info(_Info, State) ->
     {noreply, State}.

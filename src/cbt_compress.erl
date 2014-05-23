@@ -24,6 +24,13 @@
 -define(COMPRESSED_TERM_PREFIX, 131, 80).
 
 
+-type compression_method() :: snappy | none.
+-export_type([compression_method/0]).
+
+
+%% @doc compress an encoded binary with the following type. When an
+%% erlang term is given it is encoded to a binary.
+-spec compress(Bin::binary()|term(), Method::compression_method()) -> Bin::binary().
 compress(<<?SNAPPY_PREFIX, _/binary>> = Bin, snappy) ->
     Bin;
 compress(<<?SNAPPY_PREFIX, _/binary>> = Bin, Method) ->
@@ -48,14 +55,17 @@ compress(Term, snappy) ->
         Bin
     end.
 
-
+%% @doc decompress a binary to an erlang decoded term.
+-spec decompress(Bin::binary()) -> Term::term().
 decompress(<<?SNAPPY_PREFIX, Rest/binary>>) ->
     {ok, TermBin} = snappy:decompress(Rest),
     binary_to_term(TermBin);
 decompress(<<?TERM_PREFIX, _/binary>> = Bin) ->
     binary_to_term(Bin).
 
-
+%% @doc check if the binary has been compressed.
+-spec is_compressed(Bin::binary()|term(),
+                    Method::compression_method()) -> true | false.
 is_compressed(<<?SNAPPY_PREFIX, _/binary>>, Method) ->
     Method =:= snappy;
 is_compressed(<<?COMPRESSED_TERM_PREFIX, _/binary>>, {deflate, _Level}) ->
