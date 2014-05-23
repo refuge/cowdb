@@ -24,6 +24,9 @@
 -define(COMPRESSED_TERM_PREFIX, 131, 80).
 
 
+-type compression_method() :: snappy | none.
+-export_type([compression_method/0]).
+
 compress(<<?SNAPPY_PREFIX, _/binary>> = Bin, snappy) ->
     Bin;
 compress(<<?SNAPPY_PREFIX, _/binary>> = Bin, Method) ->

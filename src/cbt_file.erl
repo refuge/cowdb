@@ -50,13 +50,10 @@
 -type cbt_file() :: pid().
 -type file_option() :: create | overwrite.
 -type file_options() :: [file_option()].
-
--type compression_method() :: snappy | none.
--type append_options() :: [{compression, compression_method()}].
+-type append_options() :: [{compression, cbt_compress:compression_method()}].
 
 -export_type([cbt_file/0]).
 -export_type([file_option/0, file_options/0]).
--export_type([compression_method/0]).
 -export_type([append_options/0]).
 
 %% @doc open a file in a gen_server that will be used to handle btree
