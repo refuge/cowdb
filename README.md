@@ -1,6 +1,6 @@
 #cbt
 
-multi-layer MVCC database based on the Apache CouchDB btree.
+multi-layer MVCC log append-only database based on the Apache CouchDB btree.
 
 ## build
 
@@ -31,3 +31,10 @@ dependencies.
 Run the following command line:
 
     $ make test
+
+
+### 3. Build the doc
+
+    $ make doc
+
+and open the `index.html` file in the doc folder.
