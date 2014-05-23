@@ -62,17 +62,20 @@ open(State, Fd) ->
 %% @doc open a btree from the file.
 %% pass in 'nil' for State if a new Btree.
 %% Options:
-%% - {split, fun(Btree, Value)} : Take a value and extract content if
+%% <ul>
+%% <li> {split, fun(Btree, Value)} : Take a value and extract content if
 %% needed from it. It returns a {key, Value} tuple. You don't need to
 %% set such function if you already give a {Key, Value} tuple to your
-%% add/add_remove functions.
-%% - {join, fun(Key, Value)} : The fonction takes the key and value and
-%% return a new Value ussed when you lookup. By default it return a {Key, Value} .
-%% - {reduce_fun, ReduceFun} : pass the reduce fun
-%% - {compression, nonde | snappy}: the compression methods used to
-%% compress the data
-%% - {less, LessFun(KeyA, KeyB)}: function used to order the btree that
-%% compare two keys.
+%% add/add_remove functions.</li>
+%% <li>{join, fun(Key, Value)} : The fonction takes the key and value and
+%% return a new Value ussed when you lookup. By default it return a
+%% {Key, Value} .</li>
+%% <li>{reduce_fun, ReduceFun} : pass the reduce fun</li>
+%% <li> {compression, nonde | snappy}: the compression methods used to
+%% compress the data</li>
+%% <li>{less, LessFun(KeyA, KeyB)}: function used to order the btree that
+%% compare two keys</li>
+%% </ul>
 -spec open(State::nil | cbtree(), Fd::cbt_file:cbt_file(),
            Options::cbtree_options()) -> {ok, cbtree()}.
 open(State, Fd, Options) ->
