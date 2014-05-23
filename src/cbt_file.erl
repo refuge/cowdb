@@ -46,16 +46,28 @@
 -define(log(Fmt,Args), ok).
 -endif.
 
-%%----------------------------------------------------------------------
-%% Args:   Valid Options are [create] and [create,overwrite].
-%%  Files are opened in read/write mode.
-%% Returns: On success, {ok, Fd}
-%%  or {error, Reason} if the file could not be opened.
-%%----------------------------------------------------------------------
 
+-type cbt_file() :: pid().
+-type file_option() :: create | overwrite.
+-type file_options() :: [file_option()].
+
+-type compression_method() :: snappy | none.
+-type append_options() :: [{compression, compression_method()}].
+
+-export_type([cbt_file/0]).
+-export_type([file_option/0, file_options/0]).
+-export_type([compression_method/0]).
+-export_type([append_options/0]).
+
+%% @doc open a file in a gen_server that will be used to handle btree
+%% I/Os.
+-spec open(Filepath::string()) -> {ok, cbt_file()} | {error, term()}.
 open(Filepath) ->
     open(Filepath, []).
 
+
+-spec open(Filepath::string(), Options::file_options())
+    -> {ok, cbt_file()} | {error, term()}.
 open(Filepath, Options) ->
     case gen_server:start_link(cbt_file,
                                {Filepath, Options, self(), Ref = make_ref()}, []) of
@@ -79,44 +91,70 @@ open(Filepath, Options) ->
             Error
     end.
 
-%%----------------------------------------------------------------------
-%% Purpose: To append an Erlang term to the end of the file.
+%% @doc append an Erlang term to the end of the file.
 %% Args:    Erlang term to serialize and append to the file.
 %% Returns: {ok, Pos, NumBytesWritten} where Pos is the file offset to
 %%  the beginning the serialized  term. Use pread_term to read the term
 %%  back.
 %%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
+-spec append_term(Fd::cbt_file(), Term::term()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_term(Fd, Term) ->
     append_term(Fd, Term, []).
 
+
+-spec append_term(Fd::cbt_file(), Term::term(),
+                  Options::append_options()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_term(Fd, Term, Options) ->
     Comp = cbt_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
     append_binary(Fd, cbt_compress:compress(Term, Comp)).
 
+
+%% @doc append an Erlang term to the end of the file and sign with an
+%% md5 prefix.
+-spec append_term_md5(Fd::cbt_file(), Term::term()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_term_md5(Fd, Term) ->
     append_term_md5(Fd, Term, []).
 
+-spec append_term_md5(Fd::cbt_file(), Term::term(),
+                      Options::append_options()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_term_md5(Fd, Term, Options) ->
     Comp = cbt_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
     append_binary_md5(Fd, cbt_compress:compress(Term, Comp)).
 
-%%----------------------------------------------------------------------
-%% Purpose: To append an Erlang binary to the end of the file.
+%% @doc append an Erlang binary to the end of the file.
 %% Args:    Erlang term to serialize and append to the file.
 %% Returns: {ok, Pos, NumBytesWritten} where Pos is the file offset to the
 %%  beginning the serialized term. Use pread_term to read the term back.
 %%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
+-spec append_binary(Fd::cbt_file(), Bin::binary()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_binary(Fd, Bin) ->
     gen_server:call(Fd, {append_bin, assemble_file_chunk(Bin)}, infinity).
 
+%% @doc append an Erlang binary to the end of the file and sign in with
+%% md5.
+-spec append_binary_md5(Fd::cbt_file(), Bin::binary()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_binary_md5(Fd, Bin) ->
     gen_server:call(Fd,
         {append_bin, assemble_file_chunk(Bin, cbt_util:md5(Bin))}, infinity).
 
+
+%% @doc like append_binary but wihout manipulating the binary, it is
+%% stored as is.
+-spec append_raw_chunk(Fd::cbt_file(), Bin::binary()) ->
+    {ok, Pos::integer(), NumBytesWriiten::integer}
+    | {error, term}.
 append_raw_chunk(Fd, Chunk) ->
     gen_server:call(Fd, {append_bin, Chunk}, infinity).
 
@@ -127,26 +165,19 @@ assemble_file_chunk(Bin) ->
 assemble_file_chunk(Bin, Md5) ->
     [<<1:1/integer, (iolist_size(Bin)):31/integer>>, Md5, Bin].
 
-%%----------------------------------------------------------------------
-%% Purpose: Reads a term from a file that was written with append_term
+%% @doc Reads a term from a file that was written with append_term
 %% Args:    Pos, the offset into the file where the term is serialized.
-%% Returns: {ok, Term}
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-
+-spec pread_term(Fd::cbt_file(), Pos::integer()) ->
+    {ok, Term::term()} | {error, term()}.
 pread_term(Fd, Pos) ->
     {ok, Bin} = pread_binary(Fd, Pos),
     {ok, cbt_compress:decompress(Bin)}.
 
 
-%%----------------------------------------------------------------------
-%% Purpose: Reads a binrary from a file that was written with append_binary
+%% @doc: Reads a binrary from a file that was written with append_binary
 %% Args:    Pos, the offset into the file where the term is serialized.
-%% Returns: {ok, Term}
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
+-spec pread_binary(Fd::cbt_file(), Pos::integer()) ->
+    {ok, Bin::binary()} | {error, term()}.
 pread_binary(Fd, Pos) ->
     {ok, L} = pread_iolist(Fd, Pos),
     {ok, iolist_to_binary(L)}.
@@ -169,49 +200,39 @@ pread_iolist(Fd, Pos) ->
         Error
     end.
 
-%%----------------------------------------------------------------------
-%% Purpose: The length of a file, in bytes.
-%% Returns: {ok, Bytes}
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
-% length in bytes
+%% @doc get he length of a file, in bytes.
+-spec bytes(Fd::cbt_file()) -> {ok, Bytes::integer()} | {error, term()}.
 bytes(Fd) ->
     gen_server:call(Fd, bytes, infinity).
 
-%%----------------------------------------------------------------------
-%% Purpose: Truncate a file to the number of bytes.
-%% Returns: ok
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
+%% @doc Truncate a file to the number of bytes.
+-spec truncate(Fd::cbt_file(), Pos::integer()) -> ok | {error, term()}.
 truncate(Fd, Pos) ->
     gen_server:call(Fd, {truncate, Pos}, infinity).
 
-%%----------------------------------------------------------------------
-%% Purpose: Ensure all bytes written to the file are flushed to disk.
-%% Returns: ok
-%%  or {error, Reason}.
-%%----------------------------------------------------------------------
-
+%% @doc Ensure all bytes written to the file are flushed to disk.
+-spec sync(FdOrPath::cbt_file()|string()) -> ok | {error, term()}.
 sync(Filepath) when is_list(Filepath) ->
     {ok, Fd} = file:open(Filepath, [append, raw]),
     try ok = file:sync(Fd) after ok = file:close(Fd) end;
 sync(Fd) ->
     gen_server:call(Fd, sync, infinity).
 
-%%----------------------------------------------------------------------
-%% Purpose: Close the file.
-%% Returns: ok
-%%----------------------------------------------------------------------
+%% @doc Close the file.
+-spec close(Fd::cbt_file()) -> ok.
 close(Fd) ->
     gen_server:call(Fd, close, infinity).
 
-
+%% @doc delete a file synchronously.
+%% Root dir is the root where to find the file. This call is blocking
+%% until the file is deleted.
+-spec delete(RootDir::string(), Filepath::string()) -> ok | {error, term()}.
 delete(RootDir, Filepath) ->
     delete(RootDir, Filepath, true).
 
-
+%% @doc delete a file asynchronously or not
+-spec delete(RootDir::string(), Filepath::string(), Async::boolean()) ->
+    ok | {error, term()}.
 delete(RootDir, Filepath, Async) ->
     DelFile = filename:join([RootDir,".delete", cbt_util:uniqid()]),
     case file:rename(Filepath, DelFile) of
@@ -227,6 +248,8 @@ delete(RootDir, Filepath, Async) ->
     end.
 
 
+%% @doc utility function to remove completely the content of a directory
+-spec nuke_dir(RootDelDir::string(), Dir::string()) -> ok.
 nuke_dir(RootDelDir, Dir) ->
     FoldFun = fun(File) ->
         Path = Dir ++ "/" ++ File,
@@ -246,7 +269,9 @@ nuke_dir(RootDelDir, Dir) ->
             ok
     end.
 
-
+%% @doc utility function to init the deletion directory where the
+%% deleted files will be temporarely stored.
+-spec init_delete_dir(RootDir::string()) -> ok.
 init_delete_dir(RootDir) ->
     Dir = filename:join(RootDir,".delete"),
     % note: ensure_dir requires an actual filename companent, which is the
@@ -258,6 +283,8 @@ init_delete_dir(RootDir) ->
         end, ok).
 
 
+%% @doc read the database header from the database file
+-spec read_header(Fd::cbt_file()) -> {ok, Header::term()} | {error, term()}.
 read_header(Fd) ->
     case gen_server:call(Fd, find_header, infinity) of
     {ok, Bin} ->
@@ -266,6 +293,8 @@ read_header(Fd) ->
         Else
     end.
 
+%% @doc write the database header at the end of the the database file
+-spec write_header(Fd::cbt_file(), Header::term()) -> ok | {error, term()}.
 write_header(Fd, Data) ->
     Bin = term_to_binary(Data),
     Md5 = cbt_util:md5(Bin),
