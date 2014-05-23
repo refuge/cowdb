@@ -1,12 +1,11 @@
 {application, cbt,
  [
-  {description, ""},
+  {description, "couchdb btree library"},
   {vsn, "1"},
   {registered, []},
   {applications, [
                   kernel,
                   stdlib
                  ]},
-  {mod, { cbt_app, []}},
   {env, []}
  ]}.
