@@ -27,7 +27,7 @@
 }).
 
 % public API
--export([open/1, open/2, close/1, bytes/1, sync/1, truncate/2]).
+-export([open/1, open/2, open/3, close/1, bytes/1, sync/1, truncate/2]).
 -export([pread_term/2, pread_iolist/2, pread_binary/2]).
 -export([append_binary/2, append_binary_md5/2]).
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
@@ -66,8 +66,9 @@ open(Filepath) ->
 -spec open(Filepath::string(), Options::file_options())
     -> {ok, cbt_file()} | {error, term()}.
 open(Filepath, Options) ->
-    case gen_server:start_link(cbt_file,
-                               {Filepath, Options, self(), Ref = make_ref()}, []) of
+    case gen_server:start_link(?MODULE,
+                               {Filepath, Options, self(),
+                                Ref = make_ref()}, []) of
         {ok, Fd} ->
             {ok, Fd};
         ignore ->
@@ -87,6 +88,30 @@ open(Filepath, Options) ->
             % be more informative. It will likely appear in the SASL log, anyway.
             Error
     end.
+
+-spec open(Name::{local, Name::atom()} | {global, GlobalName::term()} |
+           {via, ViaName::term()}, Filepath::string(),
+           Options::file_options()) -> {ok, cbt_file()} | {error, term()}.
+open(Name, Filepath, Options) ->
+    case gen_server:start_link(Name, ?MODULE,
+                               {Filepath, Options, self(),
+                                Ref = make_ref()}, []) of
+        {ok, Fd} ->
+            {ok, Fd};
+        ignore ->
+            receive
+                {Ref, Pid, {error, _Reason} = Error} ->
+                    case process_info(self(), trap_exit) of
+                        {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
+                        {trap_exit, false} -> ok
+                    end,
+
+                    Error
+            end;
+        Error ->
+            Error
+    end.
+
 
 %% @doc append an Erlang term to the end of the file.
 %% Args:    Erlang term to serialize and append to the file.
