@@ -243,7 +243,16 @@ sync(Fd) ->
 %% @doc Close the file.
 -spec close(Fd::cbt_file()) -> ok.
 close(Fd) ->
-    gen_server:call(Fd, close, infinity).
+    try
+        gen_server:call(Fd, close, infinity)
+    catch
+        exit:{noproc,_} -> ok;
+        exit:noproc -> ok;
+        %% Handle the case where the monitor triggers
+        exit:{normal, _} -> ok
+    end.
+
+
 
 %% @doc delete a file synchronously.
 %% Root dir is the root where to find the file. This call is blocking
