@@ -454,6 +454,8 @@ reduce_tree_size(kv_node, NodeSize, _KvList) ->
     NodeSize;
 reduce_tree_size(kp_node, NodeSize, []) ->
     NodeSize;
+reduce_tree_size(kp_node, _NodeSize, [{_K, {_P, _Red, nil}} | _]) ->
+    nil;
 reduce_tree_size(kp_node, NodeSize, [{_K, {_P, _Red, Sz}} | NodeList]) ->
     reduce_tree_size(kp_node, NodeSize + Sz, NodeList).
 
