@@ -33,7 +33,7 @@
                         | {compression, cbt_compress:compression_method()}
                         | {chunk_threshold, integer()}].
 
--type cbt_kv() :: {Key::term(), Val::term()}.
+-type cbt_kv() :: {Key::any(), Val::any()}.
 -type cbt_kvs() :: [cbt_kv()].
 -type cbt_keys() :: [term()].
 
@@ -127,7 +127,7 @@ add(Bt, InsertKeyValues) ->
 %% @doc insert and remove a list of key/values in the btree in one
 %% write.
 -spec add_remove(Btree::cbtree(), InsertKeyValues::cbt_kvs(),
-          RemoveKeys::cbtree()) -> {ok, Btree2::cbtree()}.
+          RemoveKeys::cbt_keys()) -> {ok, Btree2::cbtree()}.
 add_remove(Bt, InsertKeyValues, RemoveKeys) ->
     {ok, [], Bt2} = query_modify(Bt, [], InsertKeyValues, RemoveKeys),
     {ok, Bt2}.
@@ -135,7 +135,7 @@ add_remove(Bt, InsertKeyValues, RemoveKeys) ->
 %% @doc insert and remove a list of key/values and retrieve a list of
 %% key/values from their key in the btree in one call.
 -spec query_modify(Btree::cbtree(), LookupKeys::cbt_keys(),
-                   InsertKeyValues::cbt_kvs(), RemoveKeys::cbtree()) ->
+                   InsertKeyValues::cbt_kvs(), RemoveKeys::cbt_keys()) ->
     {ok, FoundKeyValues::cbt_kvs(), Btree2::cbtree()}.
 query_modify(Bt, LookupKeys, InsertValues, RemoveKeys) ->
     #btree{root=Root} = Bt,
