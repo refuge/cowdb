@@ -225,18 +225,19 @@ fold(#btree{root=Root}=Bt, Fun, Acc, Options) ->
 
 
 %% @doc apply the reduce function on last reductions.
--spec final_reduce(Btree::cbtree(), LastReduction::[term()]) -> term().
+-spec final_reduce(Btree::cbtree(), LastReduction::{any(), any()}) -> term().
 final_reduce(#btree{reduce=Reduce}, Val) ->
-    final_reduce(Reduce, Val);
-final_reduce(Reduce, {[], []}) ->
+    do_final_reduce(Reduce, Val).
+
+do_final_reduce(Reduce, {[], []}) ->
     Reduce(reduce, []);
-final_reduce(_Bt, {[], [Red]}) ->
+do_final_reduce(_Bt, {[], [Red]}) ->
     Red;
-final_reduce(Reduce, {[], Reductions}) ->
+do_final_reduce(Reduce, {[], Reductions}) ->
     Reduce(rereduce, Reductions);
-final_reduce(Reduce, {KVs, Reductions}) ->
+do_final_reduce(Reduce, {KVs, Reductions}) ->
     Red = Reduce(reduce, KVs),
-    final_reduce(Reduce, {[], [Red | Reductions]}).
+    do_final_reduce(Reduce, {[], [Red | Reductions]}).
 
 %% @doc fold reduce values.
 %%
@@ -455,6 +456,8 @@ reduce_tree_size(kp_node, NodeSize, []) ->
     NodeSize;
 reduce_tree_size(kp_node, NodeSize, [{_K, {_P, _Red, Sz}} | NodeList]) ->
     reduce_tree_size(kp_node, NodeSize + Sz, NodeList).
+
+
 
 get_node(#btree{fd = Fd}, NodePos) ->
     {ok, {NodeType, NodeList}} = cbt_file:pread_term(Fd, NodePos),
