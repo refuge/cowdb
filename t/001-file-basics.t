@@ -18,10 +18,11 @@
         end, Got, Desc)).
 
 filename() -> test_util:build_file("t/temp.010").
+filename1() -> test_util:build_file("t/temp.011").
 
 main(_) ->
     test_util:init_code_path(),
-    etap:plan(19),
+    etap:plan(23),
     case (catch test()) of
         ok ->
             etap:end_tests();
@@ -110,4 +111,19 @@ test() ->
 
     etap:is(ok, cbt_file:close(Fd),
         "Files close properly."),
+
+
+    {ok, Fd2} = cbt_file:open(filename1() ++ ".0", [create_if_missing]),
+    etap:ok(is_pid(Fd2),
+        "Returned file descriptor is a Pid"),
+
+    etap:is(ok, cbt_file:close(Fd2), "File2 closed properly."),
+
+    {ok, Fd3} = cbt_file:open(filename1() ++ ".0", [create_if_missing]),
+    etap:ok(is_pid(Fd3),
+        "Returned file descriptor is a Pid"),
+
+    etap:is(ok, cbt_file:close(Fd3), "File3 closed properly."),
+
+
     ok.

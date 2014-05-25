@@ -343,7 +343,18 @@ init_status_error(ReturnPid, Ref, Error) ->
 init({Filepath, Options, ReturnPid, Ref}) ->
     process_flag(trap_exit, true),
     OpenOptions = file_open_options(Options),
-    case lists:member(create, Options) of
+
+    IfCreate = case lists:member(create_if_missing, Options) of
+        true ->
+            case file:read_file_info(Filepath) of
+                {error, enoent} -> true;
+                _ -> lists:member(overwrite, Options)
+            end;
+        false ->
+            lists:member(create, Options)
+    end,
+
+    case IfCreate of
     true ->
         filelib:ensure_dir(Filepath),
         case file:open(Filepath, OpenOptions) of

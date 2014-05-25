@@ -13,7 +13,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
-filename() -> test_util:build_file("t/temp.011").
+filename() -> test_util:build_file("t/temp.012").
 sizeblock() -> 4096. % Need to keep this in sync with cbt_file.erl
 
 main(_) ->
