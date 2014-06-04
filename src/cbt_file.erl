@@ -15,11 +15,9 @@
 
 -include("cbt.hrl").
 
-
--define(INITIAL_WAIT, 60000).
--define(MONITOR_CHECK, 10000).
 -define(SIZE_BLOCK, 16#1000). % 4 KiB
-
+-define(RETRY_TIME_MS, 1000).
+-define(MAX_RETRY_TIME_MS, 10000).
 
 -record(file, {
     fd,
@@ -27,7 +25,7 @@
 }).
 
 % public API
--export([open/1, open/2, open/3, close/1, bytes/1, sync/1, truncate/2]).
+-export([open/1, open/2, close/1, bytes/1, sync/1, truncate/2]).
 -export([pread_term/2, pread_iolist/2, pread_binary/2]).
 -export([append_binary/2, append_binary_md5/2]).
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
@@ -36,8 +34,8 @@
 -export([delete/2, delete/3, nuke_dir/2, init_delete_dir/1]).
 
 % gen_server callbacks
--export([init/1, terminate/2, code_change/3]).
--export([handle_call/3, handle_cast/2, handle_info/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
 
 
 -ifdef(DEBUG).
@@ -58,59 +56,15 @@
 
 %% @doc open a file in a gen_server that will be used to handle btree
 %% I/Os.
--spec open(Filepath::string()) -> {ok, cbt_file()} | {error, term()}.
-open(Filepath) ->
-    open(Filepath, []).
+-spec open(FilePath::string()) -> {ok, cbt_file()} | {error, term()}.
+open(FilePath) ->
+    open(FilePath, []).
 
 
--spec open(Filepath::string(), Options::file_options())
+-spec open(FilePath::string(), Options::file_options())
     -> {ok, cbt_file()} | {error, term()}.
-open(Filepath, Options) ->
-    case gen_server:start_link(?MODULE,
-                               {Filepath, Options, self(),
-                                Ref = make_ref()}, []) of
-        {ok, Fd} ->
-            {ok, Fd};
-        ignore ->
-            % get the error
-            receive
-                {Ref, Pid, {error, _Reason} = Error} ->
-                    case process_info(self(), trap_exit) of
-                        {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
-                        {trap_exit, false} -> ok
-                    end,
-
-                    Error
-            end;
-        Error ->
-            % We can't say much here, because it could be any kind of error.
-            % Just let it bubble and an encapsulating subcomponent can perhaps
-            % be more informative. It will likely appear in the SASL log, anyway.
-            Error
-    end.
-
--spec open(Name::{local, Name::atom()} | {global, GlobalName::term()} |
-           {via, ViaName::term()}, Filepath::string(),
-           Options::file_options()) -> {ok, cbt_file()} | {error, term()}.
-open(Name, Filepath, Options) ->
-    case gen_server:start_link(Name, ?MODULE,
-                               {Filepath, Options, self(),
-                                Ref = make_ref()}, []) of
-        {ok, Fd} ->
-            {ok, Fd};
-        ignore ->
-            receive
-                {Ref, Pid, {error, _Reason} = Error} ->
-                    case process_info(self(), trap_exit) of
-                        {trap_exit, true} -> receive {'EXIT', Pid, _} -> ok end;
-                        {trap_exit, false} -> ok
-                    end,
-
-                    Error
-            end;
-        Error ->
-            Error
-    end.
+open(FilePath, Options) ->
+    proc_lib:start_link(?MODULE, init, [{FilePath, Options}]).
 
 
 %% @doc append an Erlang term to the end of the file.
@@ -234,8 +188,8 @@ truncate(Fd, Pos) ->
 
 %% @doc Ensure all bytes written to the file are flushed to disk.
 -spec sync(FdOrPath::cbt_file()|string()) -> ok | {error, term()}.
-sync(Filepath) when is_list(Filepath) ->
-    {ok, Fd} = file:open(Filepath, [append, raw]),
+sync(FilePath) when is_list(FilePath) ->
+    {ok, Fd} = file:open(FilePath, [append, raw]),
     try ok = file:sync(Fd) after ok = file:close(Fd) end;
 sync(Fd) ->
     gen_server:call(Fd, sync, infinity).
@@ -257,16 +211,16 @@ close(Fd) ->
 %% @doc delete a file synchronously.
 %% Root dir is the root where to find the file. This call is blocking
 %% until the file is deleted.
--spec delete(RootDir::string(), Filepath::string()) -> ok | {error, term()}.
-delete(RootDir, Filepath) ->
-    delete(RootDir, Filepath, true).
+-spec delete(RootDir::string(), FilePath::string()) -> ok | {error, term()}.
+delete(RootDir, FilePath) ->
+    delete(RootDir, FilePath, true).
 
 %% @doc delete a file asynchronously or not
--spec delete(RootDir::string(), Filepath::string(), Async::boolean()) ->
+-spec delete(RootDir::string(), FilePath::string(), Async::boolean()) ->
     ok | {error, term()}.
-delete(RootDir, Filepath, Async) ->
+delete(RootDir, FilePath, Async) ->
     DelFile = filename:join([RootDir,".delete", cbt_util:uniqid()]),
-    case file:rename(Filepath, DelFile) of
+    case file:rename(FilePath, DelFile) of
     ok ->
         if (Async) ->
             spawn(file, delete, [DelFile]),
@@ -334,78 +288,32 @@ write_header(Fd, Data) ->
     gen_server:call(Fd, {write_header, FinalBin}, infinity).
 
 
-init_status_error(ReturnPid, Ref, Error) ->
-    ReturnPid ! {Ref, self(), Error},
-    ignore.
-
 % server functions
 
-init({Filepath, Options, ReturnPid, Ref}) ->
-    process_flag(trap_exit, true),
-    OpenOptions = file_open_options(Options),
+init({FilePath, Options}) ->
+    ok = maybe_create_file(FilePath, Options),
+    case file:read_file_info(FilePath) of
+        {ok, _} ->
+            OpenOptions = case lists:member(read_only, Options) of
+                true -> [binary, read, raw];
+                false -> [binary, read, append, raw]
+            end,
+            case try_open_fd(FilePath, OpenOptions, ?RETRY_TIME_MS,
+                             ?MAX_RETRY_TIME_MS) of
+                {ok, Fd} ->
+                    process_flag(trap_exit, true),
+                    {ok, Eof} = file:position(Fd, eof),
 
-    IfCreate = case lists:member(create_if_missing, Options) of
-        true ->
-            case file:read_file_info(Filepath) of
-                {error, enoent} -> true;
-                _ -> lists:member(overwrite, Options)
-            end;
-        false ->
-            lists:member(create, Options)
-    end,
-
-    case IfCreate of
-    true ->
-        filelib:ensure_dir(Filepath),
-        case file:open(Filepath, OpenOptions) of
-        {ok, Fd} ->
-            {ok, Length} = file:position(Fd, eof),
-            case Length > 0 of
-            true ->
-                % this means the file already exists and has data.
-                % FYI: We don't differentiate between empty files and non-existant
-                % files here.
-                case lists:member(overwrite, Options) of
-                true ->
-                    {ok, 0} = file:position(Fd, 0),
-                    ok = file:truncate(Fd),
-                    ok = file:sync(Fd),
-                    {ok, #file{fd=Fd}};
-                false ->
-                    ok = file:close(Fd),
-                    init_status_error(ReturnPid, Ref, {error, eexist})
-                end;
-            false ->
-                {ok, #file{fd=Fd}}
+                    proc_lib:init_ack({ok, self()}),
+                    InitState = #file{fd=Fd,
+                                      eof=Eof},
+                    gen_server:enter_loop(?MODULE, [], InitState);
+                Error ->
+                    proc_lib:init_ack(Error)
             end;
         Error ->
-            init_status_error(ReturnPid, Ref, Error)
-        end;
-    false ->
-        % open in read mode first, so we don't create the file if it doesn't exist.
-        case file:open(Filepath, [read, raw]) of
-        {ok, Fd_Read} ->
-            {ok, Fd} = file:open(Filepath, OpenOptions),
-            ok = file:close(Fd_Read),
-            {ok, Eof} = file:position(Fd, eof),
-            {ok, #file{fd=Fd, eof=Eof}};
-        Error ->
-            init_status_error(ReturnPid, Ref, Error)
-        end
+            proc_lib:init_ack(Error)
     end.
-
-file_open_options(Options) ->
-    [read, raw, binary] ++ case lists:member(read_only, Options) of
-    true ->
-        [];
-    false ->
-        [append]
-    end.
-
-terminate(_Reason, #file{fd = nil}) ->
-    ok;
-terminate(_Reason, #file{fd = Fd}) ->
-    ok = file:close(Fd).
 
 handle_call(close, _From, #file{fd=Fd}=File) ->
     {stop, normal, file:close(Fd), File#file{fd = nil}};
@@ -477,13 +385,92 @@ handle_call(find_header, _From, #file{fd = Fd, eof = Pos} = File) ->
 handle_cast(close, Fd) ->
     {stop,normal,Fd}.
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
 handle_info({'EXIT', _, normal}, Fd) ->
     {noreply, Fd};
 handle_info({'EXIT', _, Reason}, Fd) ->
     {stop, Reason, Fd}.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+terminate(_Reason, #file{fd = nil}) ->
+    ok;
+terminate(_Reason, #file{fd = Fd}) ->
+    ok = file:close(Fd).
+
+
+
+maybe_create_file(FilePath, Options) ->
+    IfCreate = case lists:member(create_if_missing, Options) of
+        true ->
+            case file:read_file_info(FilePath) of
+                {error, enoent} -> true;
+                _ -> lists:member(overwrite, Options)
+            end;
+        false ->
+            lists:member(create, Options)
+    end,
+
+    case IfCreate of
+        true ->
+            filelib:ensure_dir(FilePath),
+            case file:open(FilePath, [read, write, binary]) of
+                {ok, Fd} ->
+                    {ok, Length} = file:position(Fd, eof),
+                    case Length > 0 of
+                        true ->
+                            % this means the file already exists and has data.
+                            % FYI: We don't differentiate between empty files and non-existant
+                            % files here.
+                            case lists:member(overwrite, Options) of
+                                true ->
+                                    {ok, 0} = file:position(Fd, 0),
+                                    ok = file:truncate(Fd),
+                                    ok = file:sync(Fd),
+                                    file:close(Fd);
+                                false ->
+                                    ok = file:close(Fd),
+                                    file_exists
+                            end;
+                        false ->
+                            file:close(Fd)
+                    end;
+                Error ->
+                    Error
+            end;
+        false ->
+            ok
+    end.
+
+try_open_fd(FilePath, Options, _Timewait, TotalTimeRemain)
+        when TotalTimeRemain < 0 ->
+    % Out of retry time.
+    % Try one last time and whatever we get is the returned result.
+    file:open(FilePath, Options);
+try_open_fd(FilePath, Options, Timewait, TotalTimeRemain) ->
+    case file:open(FilePath, Options) of
+        {ok, Fd} ->
+            {ok, Fd};
+        {error, emfile} ->
+            error_logger:info_msg("Too many file descriptors open, waiting"
+                                  ++ " ~pms to retry", [Timewait]),
+            receive
+            after Timewait ->
+                    try_open_fd(FilePath, Options, Timewait,
+                                TotalTimeRemain - Timewait)
+            end;
+        {error, eacces} ->
+            error_logger:info_msg("eacces error opening file ~p waiting"
+                                  ++ " ~pms to retry", [FilePath, Timewait]),
+            receive
+            after Timewait ->
+                    try_open_fd(FilePath, Options, Timewait,
+                                TotalTimeRemain - Timewait)
+            end;
+        Error ->
+            Error
+    end.
+
 
 
 find_header(_Fd, -1) ->
