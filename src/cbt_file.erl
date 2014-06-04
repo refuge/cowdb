@@ -36,8 +36,8 @@
 -export([delete/2, delete/3, nuke_dir/2, init_delete_dir/1]).
 
 % gen_server callbacks
--export([init/1, terminate/2, code_change/3]).
--export([handle_call/3, handle_cast/2, handle_info/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
 
 
 -ifdef(DEBUG).
@@ -402,10 +402,7 @@ file_open_options(Options) ->
         [append]
     end.
 
-terminate(_Reason, #file{fd = nil}) ->
-    ok;
-terminate(_Reason, #file{fd = Fd}) ->
-    ok = file:close(Fd).
+
 
 handle_call(close, _From, #file{fd=Fd}=File) ->
     {stop, normal, file:close(Fd), File#file{fd = nil}};
@@ -477,14 +474,18 @@ handle_call(find_header, _From, #file{fd = Fd, eof = Pos} = File) ->
 handle_cast(close, Fd) ->
     {stop,normal,Fd}.
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
 handle_info({'EXIT', _, normal}, Fd) ->
     {noreply, Fd};
 handle_info({'EXIT', _, Reason}, Fd) ->
     {stop, Reason, Fd}.
 
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+terminate(_Reason, #file{fd = nil}) ->
+    ok;
+terminate(_Reason, #file{fd = Fd}) ->
+    ok = file:close(Fd).
 
 find_header(_Fd, -1) ->
     no_valid_header;
