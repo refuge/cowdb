@@ -33,7 +33,7 @@ main(_) ->
     ok.
 
 test() ->
-    etap:is({error, enoent}, cbt_file:open("not a real file"),
+    etap:is(cbt_file:open("not a real file"), {error, enoent},
         "Opening a non-existant file should return an enoent error."),
 
     etap:fun_is(
