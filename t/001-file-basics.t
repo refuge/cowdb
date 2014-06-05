@@ -79,8 +79,8 @@ test() ->
     etap:is({ok, BigBin}, cbt_file:pread_binary(Fd, BigBinPos),
         "Reading a large term from a written representation succeeds."),
 
-    ok = cbt_file:write_header(Fd, hello),
-    etap:is({ok, hello}, cbt_file:read_header(Fd),
+    {ok, HeaderPos} = cbt_file:write_header(Fd, hello),
+    etap:is(cbt_file:read_header(Fd), {ok, hello, HeaderPos},
         "Reading a header succeeds."),
 
     {ok, BigBinPos2, _} = cbt_file:append_binary(Fd, BigBin),

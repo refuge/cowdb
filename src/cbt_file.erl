@@ -269,17 +269,19 @@ init_delete_dir(RootDir) ->
 
 
 %% @doc read the database header from the database file
--spec read_header(Fd::cbt_file()) -> {ok, Header::term()} | {error, term()}.
+-spec read_header(Fd::cbt_file())
+    -> {ok, Header::term(), Pos::integer()} | {error, term()}.
 read_header(Fd) ->
     case gen_server:call(Fd, find_header, infinity) of
-    {ok, Bin} ->
-        {ok, binary_to_term(Bin)};
+    {ok, Bin, Pos} ->
+        {ok, binary_to_term(Bin), Pos};
     Else ->
         Else
     end.
 
 %% @doc write the database header at the end of the the database file
--spec write_header(Fd::cbt_file(), Header::term()) -> ok | {error, term()}.
+-spec write_header(Fd::cbt_file(), Header::term())
+    -> {ok, Pos::integer()} | {error, term()}.
 write_header(Fd, Data) ->
     Bin = term_to_binary(Data),
     Md5 = cbt_util:md5(Bin),
@@ -365,16 +367,17 @@ handle_call({append_bin, Bin}, _From, #file{fd = Fd, eof = Pos} = File) ->
 
 handle_call({write_header, Bin}, _From, #file{fd = Fd, eof = Pos} = File) ->
     BinSize = byte_size(Bin),
-    Padding = case Pos rem ?SIZE_BLOCK of
+    {Padding, Pos2} = case Pos rem ?SIZE_BLOCK of
     0 ->
-        <<>>;
+        {<<>>, Pos};
     BlockOffset ->
-        <<0:(8*(?SIZE_BLOCK-BlockOffset))>>
+        Pos1 = Pos + (?SIZE_BLOCK -  BlockOffset),
+        {<<0:(8*(?SIZE_BLOCK-BlockOffset))>>, Pos1}
     end,
     FinalBin = [Padding, <<1, BinSize:32/integer>> | make_blocks(5, [Bin])],
     case file:write(Fd, FinalBin) of
     ok ->
-        {reply, ok, File#file{eof = Pos + iolist_size(FinalBin)}};
+        {reply, {ok, Pos2}, File#file{eof = Pos + iolist_size(FinalBin)}};
     Error ->
         {reply, Error, File}
     end;
@@ -478,7 +481,7 @@ find_header(_Fd, -1) ->
 find_header(Fd, Block) ->
     case (catch load_header(Fd, Block)) of
     {ok, Bin} ->
-        {ok, Bin};
+        {ok, Bin, Block * ?SIZE_BLOCK};
     _Error ->
         find_header(Fd, Block -1)
     end.

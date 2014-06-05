@@ -37,30 +37,30 @@ test() ->
     etap:is({ok, 0}, cbt_file:bytes(Fd),
         "File should be initialized to contain zero bytes."),
 
-    etap:is(ok, cbt_file:write_header(Fd, {<<"some_data">>, 32}),
+    etap:is({ok, 0}, cbt_file:write_header(Fd, {<<"some_data">>, 32}),
         "Writing a header succeeds."),
 
     {ok, Size1} = cbt_file:bytes(Fd),
     etap:is_greater(Size1, 0,
         "Writing a header allocates space in the file."),
 
-    etap:is({ok, {<<"some_data">>, 32}}, cbt_file:read_header(Fd),
+    etap:is({ok, {<<"some_data">>, 32}, 0}, cbt_file:read_header(Fd),
         "Reading the header returns what we wrote."),
 
-    etap:is(ok, cbt_file:write_header(Fd, [foo, <<"more">>]),
+    etap:is({ok, 4096}, cbt_file:write_header(Fd, [foo, <<"more">>]),
         "Writing a second header succeeds."),
 
     {ok, Size2} = cbt_file:bytes(Fd),
     etap:is_greater(Size2, Size1,
         "Writing a second header allocates more space."),
 
-    etap:is({ok, [foo, <<"more">>]}, cbt_file:read_header(Fd),
+    etap:is({ok, [foo, <<"more">>], 4096}, cbt_file:read_header(Fd),
         "Reading the second header does not return the first header."),
 
     % Delete the second header.
     ok = cbt_file:truncate(Fd, Size1),
 
-    etap:is({ok, {<<"some_data">>, 32}}, cbt_file:read_header(Fd),
+    etap:is({ok, {<<"some_data">>, 32}, 0}, cbt_file:read_header(Fd),
         "Reading the header after a truncation returns a previous header."),
 
     cbt_file:write_header(Fd, [foo, <<"more">>]),
@@ -70,7 +70,7 @@ test() ->
     cbt_file:write_header(Fd, erlang:make_tuple(5000, <<"CouchDB">>)),
     etap:is(
         cbt_file:read_header(Fd),
-        {ok, erlang:make_tuple(5000, <<"CouchDB">>)},
+        {ok, erlang:make_tuple(5000, <<"CouchDB">>), 8192},
         "Headers larger than the block size can be saved (COUCHDB-1319)"
     ),
 
@@ -126,12 +126,12 @@ check_header_recovery(CheckFun) ->
 
     {ok, _} = write_random_data(Fd),
     ExpectHeader = {some_atom, <<"a binary">>, 756},
-    ok = cbt_file:write_header(Fd, ExpectHeader),
+    {ok, ValidHeaderPos} = cbt_file:write_header(Fd, ExpectHeader),
 
     {ok, HeaderPos} = write_random_data(Fd),
-    ok = cbt_file:write_header(Fd, {2342, <<"corruption! greed!">>}),
+    {ok, _} = cbt_file:write_header(Fd, {2342, <<"corruption! greed!">>}),
 
-    CheckFun(Fd, RawFd, {ok, ExpectHeader}, HeaderPos),
+    CheckFun(Fd, RawFd, {ok, ExpectHeader, ValidHeaderPos}, HeaderPos),
 
     ok = file:close(RawFd),
     ok = cbt_file:close(Fd),
