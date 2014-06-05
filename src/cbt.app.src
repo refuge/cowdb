@@ -1,7 +1,7 @@
 {application, cbt,
  [
   {description, "couch btree library"},
-  {vsn, "0.2"},
+  {vsn, "0.2.1"},
   {registered, []},
   {applications, [
                   kernel,
