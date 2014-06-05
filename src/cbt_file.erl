@@ -91,7 +91,7 @@ append_term(Fd, Term, Options) ->
 
 
 %% @doc append an Erlang term to the end of the file and sign with an
-%% md5 prefix.
+%% crc32 prefix.
 -spec append_term_crc32(Fd::cbt_file(), Term::term()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
@@ -118,7 +118,7 @@ append_binary(Fd, Bin) ->
     gen_server:call(Fd, {append_bin, assemble_file_chunk(Bin)}, infinity).
 
 %% @doc append an Erlang binary to the end of the file and sign in with
-%% md5.
+%% crc32.
 -spec append_binary_crc32(Fd::cbt_file(), Bin::binary()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
@@ -285,9 +285,9 @@ read_header(Fd) ->
     -> {ok, Pos::integer()} | {error, term()}.
 write_header(Fd, Data) ->
     Bin = term_to_binary(Data),
-    Md5 = cbt_util:md5(Bin),
+    Crc32 = erlang:crc32(Bin),
     % now we assemble the final header binary and write to disk
-    FinalBin = <<Md5/binary, Bin/binary>>,
+    FinalBin = <<Crc32:32/integer, Bin/binary>>,
     gen_server:call(Fd, {write_header, FinalBin}, infinity).
 
 
@@ -501,9 +501,9 @@ load_header(Fd, Block) ->
                     TotalBytes - byte_size(RestBlock)),
             <<RestBlock/binary, Missing/binary>>
     end,
-    <<Md5Sig:16/binary, HeaderBin/binary>> =
+    <<Crc32Sig:32/integer, HeaderBin/binary>> =
         iolist_to_binary(remove_block_prefixes(5, RawBin)),
-    Md5Sig = cbt_util:md5(HeaderBin),
+    Crc32Sig = erlang:crc32(HeaderBin),
     {ok, HeaderBin}.
 
 maybe_read_more_iolist(Buffer, DataSize, _, _)
