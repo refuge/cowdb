@@ -27,9 +27,10 @@
 % public API
 -export([open/1, open/2, close/1, bytes/1, sync/1, truncate/2]).
 -export([pread_term/2, pread_iolist/2, pread_binary/2]).
--export([append_binary/2, append_binary_md5/2]).
+-export([append_binary/2, append_binary_crc32/2]).
 -export([append_raw_chunk/2, assemble_file_chunk/1, assemble_file_chunk/2]).
--export([append_term/2, append_term/3, append_term_md5/2, append_term_md5/3]).
+-export([append_term/2, append_term/3, append_term_crc32/2,
+         append_term_crc32/3]).
 -export([write_header/2, read_header/1]).
 -export([delete/2, delete/3, nuke_dir/2, init_delete_dir/1]).
 
@@ -91,19 +92,19 @@ append_term(Fd, Term, Options) ->
 
 %% @doc append an Erlang term to the end of the file and sign with an
 %% md5 prefix.
--spec append_term_md5(Fd::cbt_file(), Term::term()) ->
+-spec append_term_crc32(Fd::cbt_file(), Term::term()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
-append_term_md5(Fd, Term) ->
-    append_term_md5(Fd, Term, []).
+append_term_crc32(Fd, Term) ->
+    append_term_crc32(Fd, Term, []).
 
--spec append_term_md5(Fd::cbt_file(), Term::term(),
+-spec append_term_crc32(Fd::cbt_file(), Term::term(),
                       Options::append_options()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
-append_term_md5(Fd, Term, Options) ->
+append_term_crc32(Fd, Term, Options) ->
     Comp = cbt_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
-    append_binary_md5(Fd, cbt_compress:compress(Term, Comp)).
+    append_binary_crc32(Fd, cbt_compress:compress(Term, Comp)).
 
 %% @doc append an Erlang binary to the end of the file.
 %% Args:    Erlang term to serialize and append to the file.
@@ -118,12 +119,12 @@ append_binary(Fd, Bin) ->
 
 %% @doc append an Erlang binary to the end of the file and sign in with
 %% md5.
--spec append_binary_md5(Fd::cbt_file(), Bin::binary()) ->
+-spec append_binary_crc32(Fd::cbt_file(), Bin::binary()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
-append_binary_md5(Fd, Bin) ->
+append_binary_crc32(Fd, Bin) ->
     gen_server:call(Fd,
-        {append_bin, assemble_file_chunk(Bin, cbt_util:md5(Bin))}, infinity).
+        {append_bin, assemble_file_chunk(Bin, erlang:crc32(Bin))}, infinity).
 
 
 %% @doc like append_binary but wihout manipulating the binary, it is
@@ -138,8 +139,8 @@ append_raw_chunk(Fd, Chunk) ->
 assemble_file_chunk(Bin) ->
     [<<0:1/integer, (iolist_size(Bin)):31/integer>>, Bin].
 
-assemble_file_chunk(Bin, Md5) ->
-    [<<1:1/integer, (iolist_size(Bin)):31/integer>>, Md5, Bin].
+assemble_file_chunk(Bin, Crc32) ->
+    [<<1:1/integer, (iolist_size(Bin)):31/integer, Crc32:32/integer>>, Bin].
 
 %% @doc Reads a term from a file that was written with append_term
 %% Args:    Pos, the offset into the file where the term is serialized.
@@ -163,9 +164,9 @@ pread_iolist(Fd, Pos) ->
     case gen_server:call(Fd, {pread_iolist, Pos}, infinity) of
     {ok, IoList, <<>>} ->
         {ok, IoList};
-    {ok, IoList, Md5} ->
-        case cbt_util:md5(IoList) of
-        Md5 ->
+    {ok, IoList, <<Crc32:32/integer>>} ->
+        case erlang:crc32(IoList) of
+        Crc32 ->
             {ok, IoList};
         _ ->
             error_logger:info_msg("File corruption in ~p at position ~B",
@@ -332,9 +333,9 @@ handle_call({pread_iolist, Pos}, _From, File) ->
         iolist_to_binary(RawData),
     case Prefix of
     1 ->
-        {Md5, IoList} = extract_md5(
-            maybe_read_more_iolist(RestRawData, 16 + Len, NextPos, File)),
-        {reply, {ok, IoList, Md5}, File};
+        {Crc32, IoList} = extract_crc32(
+            maybe_read_more_iolist(RestRawData, 4 + Len, NextPos, File)),
+        {reply, {ok, IoList, Crc32}, File};
     0 ->
         IoList = maybe_read_more_iolist(RestRawData, Len, NextPos, File),
         {reply, {ok, IoList, <<>>}, File}
@@ -524,10 +525,10 @@ read_raw_iolist_int(#file{fd = Fd}, Pos, Len) ->
     {ok, <<RawBin:TotalBytes/binary>>} = file:pread(Fd, Pos, TotalBytes),
     {remove_block_prefixes(BlockOffset, RawBin), Pos + TotalBytes}.
 
--spec extract_md5(iolist()) -> {binary(), iolist()}.
-extract_md5(FullIoList) ->
-    {Md5List, IoList} = split_iolist(FullIoList, 16, []),
-    {iolist_to_binary(Md5List), IoList}.
+-spec extract_crc32(iolist()) -> {binary(), iolist()}.
+extract_crc32(FullIoList) ->
+    {CrcList, IoList} = split_iolist(FullIoList, 4, []),
+    {iolist_to_binary(CrcList), IoList}.
 
 calculate_total_read_len(0, FinalLen) ->
     calculate_total_read_len(1, FinalLen) + 1;
