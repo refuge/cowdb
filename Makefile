@@ -3,7 +3,7 @@ SUPPORT_DIR=$(BASE_DIR)/support
 ERLC ?= $(shell which erlc)
 ESCRIPT ?= $(shell which escript)
 ERL ?= $(shell which erl)
-APP := cbt
+APP := cowdb
 REBAR?= rebar
 
 $(if $(ERLC),,$(warning "Warning: No Erlang found in your path, this will probably not work"))

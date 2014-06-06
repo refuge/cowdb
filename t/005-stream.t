@@ -26,40 +26,40 @@ main(_) ->
     ok.
 
 read_all(Fd, PosList) ->
-    Data = cbt_stream:foldl(Fd, PosList, fun(Bin, Acc) -> [Bin, Acc] end, []),
+    Data = cowdb_stream:foldl(Fd, PosList, fun(Bin, Acc) -> [Bin, Acc] end, []),
     iolist_to_binary(Data).
 
 test() ->
-    {ok, Fd} = cbt_file:open(test_util:build_file("t/temp.050"),
+    {ok, Fd} = cowdb_file:open(test_util:build_file("t/temp.050"),
                                [create,overwrite]),
-    {ok, Stream} = cbt_stream:open(Fd),
+    {ok, Stream} = cowdb_stream:open(Fd),
 
-    etap:is(ok, cbt_stream:write(Stream, <<"food">>),
+    etap:is(ok, cowdb_stream:write(Stream, <<"food">>),
         "Writing to streams works."),
 
-    etap:is(ok, cbt_stream:write(Stream, <<"foob">>),
+    etap:is(ok, cowdb_stream:write(Stream, <<"foob">>),
         "Consecutive writing to streams works."),
 
-    etap:is(ok, cbt_stream:write(Stream, <<>>),
+    etap:is(ok, cowdb_stream:write(Stream, <<>>),
         "Writing an empty binary does nothing."),
 
-    {Ptrs, Length, _, _, _} = cbt_stream:close(Stream),
+    {Ptrs, Length, _, _, _} = cowdb_stream:close(Stream),
     etap:is(Ptrs, [{0, 8}], "Close returns the file pointers."),
     etap:is(Length, 8, "Close also returns the number of bytes written."),
     etap:is(<<"foodfoob">>, read_all(Fd, Ptrs), "Returned pointers are valid."),
 
     % Remember where we expect the pointer to be.
-    {ok, ExpPtr} = cbt_file:bytes(Fd),
-    {ok, Stream2} = cbt_stream:open(Fd),
+    {ok, ExpPtr} = cowdb_file:bytes(Fd),
+    {ok, Stream2} = cowdb_stream:open(Fd),
     OneBits = <<1:(8*10)>>,
-    etap:is(ok, cbt_stream:write(Stream2, OneBits),
+    etap:is(ok, cowdb_stream:write(Stream2, OneBits),
         "Successfully wrote 79 zero bits and 1 one bit."),
 
     ZeroBits = <<0:(8*10)>>,
-    etap:is(ok, cbt_stream:write(Stream2, ZeroBits),
+    etap:is(ok, cowdb_stream:write(Stream2, ZeroBits),
         "Successfully wrote 80 0 bits."),
 
-    {Ptrs2, Length2, _, _, _} = cbt_stream:close(Stream2),
+    {Ptrs2, Length2, _, _, _} = cowdb_stream:close(Stream2),
     etap:is(Ptrs2, [{ExpPtr, 20}], "Closing stream returns the file pointers."),
     etap:is(Length2, 20, "Length written is 160 bytes."),
 
@@ -67,14 +67,14 @@ test() ->
     etap:is(AllBits, read_all(Fd, Ptrs2), "Returned pointers are valid."),
 
     % Stream more the 4K chunk size.
-    {ok, ExpPtr2} = cbt_file:bytes(Fd),
-    {ok, Stream3} = cbt_stream:open(Fd, [{buffer_size, 4096}]),
+    {ok, ExpPtr2} = cowdb_file:bytes(Fd),
+    {ok, Stream3} = cowdb_stream:open(Fd, [{buffer_size, 4096}]),
     lists:foldl(fun(_, Acc) ->
         Data = <<"a1b2c">>,
-        cbt_stream:write(Stream3, Data),
+        cowdb_stream:write(Stream3, Data),
         [Data | Acc]
     end, [], lists:seq(1, 1024)),
-    {Ptrs3, Length3, _, _, _} = cbt_stream:close(Stream3),
+    {Ptrs3, Length3, _, _, _} = cowdb_stream:close(Stream3),
 
     % 4095 because of 5 * 4096 rem 5 (last write before exceeding threshold)
     % + 5 puts us over the threshold
@@ -84,5 +84,5 @@ test() ->
     etap:is(Ptrs3, [{ExpPtr2, 4100}, {SecondPtr, 1020}], "Pointers every 4K bytes."),
     etap:is(Length3, 5120, "Wrote the expected 5K bytes."),
 
-    cbt_file:close(Fd),
+    cowdb_file:close(Fd),
     ok.

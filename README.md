@@ -1,6 +1,6 @@
-#cbt
+#cowdb
 
-multi-layer MVCC log append-only database based on the Apache CouchDB btree.
+copy-on-write object database based on the Apache CouchDB btree.
 
 ## build
 
@@ -18,7 +18,7 @@ install it.
 
 Fetch the source code:
 
-    $ git clone git@bitbucket.org:refugeio/cbt.git
+    $ git clone git@bitbucket.org:refugeio/cowdb.git
 
 Build the source, run the `make` command. It will fetch any needed
 dependencies.
@@ -38,11 +38,11 @@ Run the following command line:
     $ make doc
 
 and open the `index.html` file in the doc folder. Or read it
-[online](http://refugeio.bitbucket.org/cbt/index.html).
+[online](http://refugeio.bitbucket.org/cowdb/index.html).
 
 
 ## contribute
 
-Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/CBT
+Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/COWDB
 ).
-Code is available on [bitbucket](https://bitbucket.org/refugeio/cbt).
+Code is available on [bitbucket](https://bitbucket.org/refugeio/cowdb).

@@ -10,10 +10,10 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(cbt_file).
+-module(cowdb_file).
 -behaviour(gen_server).
 
--include("cbt.hrl").
+-include("cowdb.hrl").
 
 -define(SIZE_BLOCK, 16#1000). % 4 KiB
 -define(RETRY_TIME_MS, 1000).
@@ -46,24 +46,24 @@
 -endif.
 
 
--type cbt_file() :: pid().
+-type cowdb_file() :: pid().
 -type file_option() :: create | overwrite.
 -type file_options() :: [file_option()].
--type append_options() :: [{compression, cbt_compress:compression_method()}].
+-type append_options() :: [{compression, cowdb_compress:compression_method()}].
 
--export_type([cbt_file/0]).
+-export_type([cowdb_file/0]).
 -export_type([file_option/0, file_options/0]).
 -export_type([append_options/0]).
 
 %% @doc open a file in a gen_server that will be used to handle btree
 %% I/Os.
--spec open(FilePath::string()) -> {ok, cbt_file()} | {error, term()}.
+-spec open(FilePath::string()) -> {ok, cowdb_file()} | {error, term()}.
 open(FilePath) ->
     open(FilePath, []).
 
 
 -spec open(FilePath::string(), Options::file_options())
-    -> {ok, cbt_file()} | {error, term()}.
+    -> {ok, cowdb_file()} | {error, term()}.
 open(FilePath, Options) ->
     proc_lib:start_link(?MODULE, init, [{FilePath, Options}]).
 
@@ -74,44 +74,44 @@ open(FilePath, Options) ->
 %%  the beginning the serialized  term. Use pread_term to read the term
 %%  back.
 %%  or {error, Reason}.
--spec append_term(Fd::cbt_file(), Term::term()) ->
+-spec append_term(Fd::cowdb_file(), Term::term()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_term(Fd, Term) ->
     append_term(Fd, Term, []).
 
 
--spec append_term(Fd::cbt_file(), Term::term(),
+-spec append_term(Fd::cowdb_file(), Term::term(),
                   Options::append_options()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_term(Fd, Term, Options) ->
-    Comp = cbt_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
-    append_binary(Fd, cbt_compress:compress(Term, Comp)).
+    Comp = cowdb_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
+    append_binary(Fd, cowdb_compress:compress(Term, Comp)).
 
 
 %% @doc append an Erlang term to the end of the file and sign with an
 %% crc32 prefix.
--spec append_term_crc32(Fd::cbt_file(), Term::term()) ->
+-spec append_term_crc32(Fd::cowdb_file(), Term::term()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_term_crc32(Fd, Term) ->
     append_term_crc32(Fd, Term, []).
 
--spec append_term_crc32(Fd::cbt_file(), Term::term(),
+-spec append_term_crc32(Fd::cowdb_file(), Term::term(),
                       Options::append_options()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_term_crc32(Fd, Term, Options) ->
-    Comp = cbt_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
-    append_binary_crc32(Fd, cbt_compress:compress(Term, Comp)).
+    Comp = cowdb_util:get_value(compression, Options, ?DEFAULT_COMPRESSION),
+    append_binary_crc32(Fd, cowdb_compress:compress(Term, Comp)).
 
 %% @doc append an Erlang binary to the end of the file.
 %% Args:    Erlang term to serialize and append to the file.
 %% Returns: {ok, Pos, NumBytesWritten} where Pos is the file offset to the
 %%  beginning the serialized term. Use pread_term to read the term back.
 %%  or {error, Reason}.
--spec append_binary(Fd::cbt_file(), Bin::binary()) ->
+-spec append_binary(Fd::cowdb_file(), Bin::binary()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_binary(Fd, Bin) ->
@@ -119,7 +119,7 @@ append_binary(Fd, Bin) ->
 
 %% @doc append an Erlang binary to the end of the file and sign in with
 %% crc32.
--spec append_binary_crc32(Fd::cbt_file(), Bin::binary()) ->
+-spec append_binary_crc32(Fd::cowdb_file(), Bin::binary()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_binary_crc32(Fd, Bin) ->
@@ -129,7 +129,7 @@ append_binary_crc32(Fd, Bin) ->
 
 %% @doc like append_binary but wihout manipulating the binary, it is
 %% stored as is.
--spec append_raw_chunk(Fd::cbt_file(), Bin::binary()) ->
+-spec append_raw_chunk(Fd::cowdb_file(), Bin::binary()) ->
     {ok, Pos::integer(), NumBytesWriiten::integer}
     | {error, term}.
 append_raw_chunk(Fd, Chunk) ->
@@ -144,16 +144,16 @@ assemble_file_chunk(Bin, Crc32) ->
 
 %% @doc Reads a term from a file that was written with append_term
 %% Args:    Pos, the offset into the file where the term is serialized.
--spec pread_term(Fd::cbt_file(), Pos::integer()) ->
+-spec pread_term(Fd::cowdb_file(), Pos::integer()) ->
     {ok, Term::term()} | {error, term()}.
 pread_term(Fd, Pos) ->
     {ok, Bin} = pread_binary(Fd, Pos),
-    {ok, cbt_compress:decompress(Bin)}.
+    {ok, cowdb_compress:decompress(Bin)}.
 
 
 %% @doc: Reads a binrary from a file that was written with append_binary
 %% Args:    Pos, the offset into the file where the term is serialized.
--spec pread_binary(Fd::cbt_file(), Pos::integer()) ->
+-spec pread_binary(Fd::cowdb_file(), Pos::integer()) ->
     {ok, Bin::binary()} | {error, term()}.
 pread_binary(Fd, Pos) ->
     {ok, L} = pread_iolist(Fd, Pos),
@@ -178,17 +178,17 @@ pread_iolist(Fd, Pos) ->
     end.
 
 %% @doc get he length of a file, in bytes.
--spec bytes(Fd::cbt_file()) -> {ok, Bytes::integer()} | {error, term()}.
+-spec bytes(Fd::cowdb_file()) -> {ok, Bytes::integer()} | {error, term()}.
 bytes(Fd) ->
     gen_server:call(Fd, bytes, infinity).
 
 %% @doc Truncate a file to the number of bytes.
--spec truncate(Fd::cbt_file(), Pos::integer()) -> ok | {error, term()}.
+-spec truncate(Fd::cowdb_file(), Pos::integer()) -> ok | {error, term()}.
 truncate(Fd, Pos) ->
     gen_server:call(Fd, {truncate, Pos}, infinity).
 
 %% @doc Ensure all bytes written to the file are flushed to disk.
--spec sync(FdOrPath::cbt_file()|string()) -> ok | {error, term()}.
+-spec sync(FdOrPath::cowdb_file()|string()) -> ok | {error, term()}.
 sync(FilePath) when is_list(FilePath) ->
     {ok, Fd} = file:open(FilePath, [append, raw]),
     try ok = file:sync(Fd) after ok = file:close(Fd) end;
@@ -196,7 +196,7 @@ sync(Fd) ->
     gen_server:call(Fd, sync, infinity).
 
 %% @doc Close the file.
--spec close(Fd::cbt_file()) -> ok.
+-spec close(Fd::cowdb_file()) -> ok.
 close(Fd) ->
     try
         gen_server:call(Fd, close, infinity)
@@ -220,7 +220,7 @@ delete(RootDir, FilePath) ->
 -spec delete(RootDir::string(), FilePath::string(), Async::boolean()) ->
     ok | {error, term()}.
 delete(RootDir, FilePath, Async) ->
-    DelFile = filename:join([RootDir,".delete", cbt_util:uniqid()]),
+    DelFile = filename:join([RootDir,".delete", cowdb_util:uniqid()]),
     case file:rename(FilePath, DelFile) of
     ok ->
         if (Async) ->
@@ -270,7 +270,7 @@ init_delete_dir(RootDir) ->
 
 
 %% @doc read the database header from the database file
--spec read_header(Fd::cbt_file())
+-spec read_header(Fd::cowdb_file())
     -> {ok, Header::term(), Pos::integer()} | {error, term()}.
 read_header(Fd) ->
     case gen_server:call(Fd, find_header, infinity) of
@@ -281,7 +281,7 @@ read_header(Fd) ->
     end.
 
 %% @doc write the database header at the end of the the database file
--spec write_header(Fd::cbt_file(), Header::term())
+-spec write_header(Fd::cowdb_file(), Header::term())
     -> {ok, Pos::integer()} | {error, term()}.
 write_header(Fd, Data) ->
     Bin = term_to_binary(Data),

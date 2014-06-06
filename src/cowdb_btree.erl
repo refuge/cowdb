@@ -10,7 +10,77 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(cbt_btree).
+%% @doc Main module to write and query multiple btree in a file created
+%% with the {@link cow_file} module.
+%%
+%% Example of usage:
+%%
+%% Store a {Key Value} pair in a btree:
+%%
+%% ```
+%% 1> {ok, Fd} = cbt_file:open("test.db").
+%% {ok,<0.35.0>}
+%% 2> {ok, Btree} = cbt_btree:new(Fd).
+%% {ok,{btree,<0.35.0>,nil,undefined,undefined,undefined,nil,
+%%            snappy,1279}}
+%% 3>
+%% 3> {ok, Btree2} = cbt_btree:add(Btree, [{a, 1}]).
+%% {ok,{btree,<0.35.0>,
+%%            {0,[],32},
+%%            undefined,undefined,undefined,nil,snappy,1279}}
+%% 4> Root = cbt_btree:get_state(Btree2).
+%% {0,[],32}
+%% 5> Header = {1, Root}.
+%% {1,{0,[],32}}
+%% 6> cbt_file:write_header(Fd, Header).
+%% ok
+%% ```
+%%
+%% What we did here is to open a file, create a btree inside and add a key
+%% value. Until we write the header, the database value is not changed.
+%%
+%% Now open the database in a new process and read the btree using the last
+%% header:
+%%
+%% ```
+%% 7> {ok, Fd1} = cbt_file:open("test.db").
+%% {ok,<0.44.0>}
+%% 8>
+%% 8> {ok, Header1} = cbt_file:read_header(Fd1).
+%% {ok,{1,{0,[],32}}}
+%% 9> Header1 == Header.
+%% true
+%% 10> {_, ReaderRoot} = Header1.
+%% {1,{0,[],32}}
+%% 11> {ok, SnapshotBtree} = cbt_btree:open(ReaderRoot, Fd1).
+%% {ok,{btree,<0.44.0>,
+%%            {0,[],32},
+%%            undefined,undefined,undefined,nil,snappy,1279}}
+%% 12> cbt_btree:lookup(SnapshotBtree, [a]).
+%% [{ok,{a,1}}]
+%% ```
+%%
+%% You can check that the database value is not change until we store the
+%% header:
+%%
+%% ```
+%% 13> {ok, Btree4} = cbt_btree:add(Btree2, [{a, 1}, {b, 2}]).
+%% {ok,{btree,<0.35.0>,
+%%            {4160,[],39},
+%%            undefined,undefined,undefined,nil,snappy,1279}}
+%% 14> cbt_btree:lookup(Btree4, [a, b]).
+%% [{ok,{a,1}},{ok,{b,2}}]
+%% 15> Root2 = cbt_btree:get_state(Btree4).
+%% {4160,[],39}
+%% 16> Header2 = {1, Root2}.
+%% {1,{4160,[],39}}
+%% 17> cbt_file:write_header(Fd, Header2).
+%% ok
+%% 18> cbt_btree:lookup(SnapshotBtree, [a, b]).
+%% [{ok,{a,1}},not_found]
+%% '''
+
+-module(cowdb_btree).
 
 -export([new/1]).
 -export([open/2, open/3]).
@@ -23,38 +93,38 @@
 -export([set_options/2]).
 -export([less/3]).
 
--include("cbt.hrl").
+-include("cowdb.hrl").
 
 -define(CHUNK_THRESHOLD, 16#4ff).
 
 -type cbtree() :: #btree{}.
 -type cbtree_options() :: [{split, fun()} | {join, fun()} | {less, fun()}
                         | {reduce, fun()}
-                        | {compression, cbt_compress:compression_method()}
+                        | {compression, cowdb_compress:compression_method()}
                         | {chunk_threshold, integer()}].
 
--type cbt_kv() :: {Key::any(), Val::any()}.
--type cbt_kvs() :: [cbt_kv()].
--type cbt_keys() :: [term()].
+-type cowdb_kv() :: {Key::any(), Val::any()}.
+-type cowdb_kvs() :: [cowdb_kv()].
+-type cowdb_keys() :: [term()].
 
--type cbt_fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
+-type cowdb_fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
                              {end_key, term()} | {end_key_gt, term()} |
                              {key_group_fun, fun()}].
 
 -export_type([cbtree/0]).
 -export_type([cbtree_options/0]).
--export_type([cbt_kv/0, cbt_kvs/0]).
--export_type([cbt_keys/0]).
--export_type([cbt_fold_options/0]).
+-export_type([cowdb_kv/0, cowdb_kvs/0]).
+-export_type([cowdb_keys/0]).
+-export_type([cowdb_fold_options/0]).
 
 %% @doc create a new btree
--spec new(Fd::cbt_file:cbt_file()) -> {ok, cbtree()}.
+-spec new(Fd::cowdb_file:cowdb_file()) -> {ok, cbtree()}.
 new(Fd) ->
     open(nil, Fd).
 
 %% @doc open a btree from the file.
 % pass in 'nil' for State if a new Btree.
--spec open(State::nil | cbtree(), Fd::cbt_file:cbt_file()) -> {ok, cbtree()}.
+-spec open(State::nil | cbtree(), Fd::cowdb_file:cowdb_file()) -> {ok, cbtree()}.
 open(State, Fd) ->
     {ok, #btree{root=State, fd=Fd}}.
 
@@ -76,7 +146,7 @@ open(State, Fd) ->
 %% <li>{less, LessFun(KeyA, KeyB)}: function used to order the btree that
 %% compare two keys</li>
 %% </ul>
--spec open(State::nil | cbtree(), Fd::cbt_file:cbt_file(),
+-spec open(State::nil | cbtree(), Fd::cowdb_file:cowdb_file(),
            Options::cbtree_options()) -> {ok, cbtree()}.
 open(State, Fd, Options) ->
     {ok, set_options(#btree{root=State, fd=Fd}, Options)}.
@@ -119,24 +189,24 @@ size(#btree{root = {_P, _Red, Size}}) ->
 %% --------------------------------
 
 %% @doc insert a list of key/values in the btree
--spec add(Btree::cbtree(), InsertKeyValues::cbt_kvs()) ->
+-spec add(Btree::cbtree(), InsertKeyValues::cowdb_kvs()) ->
     {ok, Btree2::cbtree()}.
 add(Bt, InsertKeyValues) ->
     add_remove(Bt, InsertKeyValues, []).
 
 %% @doc insert and remove a list of key/values in the btree in one
 %% write.
--spec add_remove(Btree::cbtree(), InsertKeyValues::cbt_kvs(),
-          RemoveKeys::cbt_keys()) -> {ok, Btree2::cbtree()}.
+-spec add_remove(Btree::cbtree(), InsertKeyValues::cowdb_kvs(),
+          RemoveKeys::cowdb_keys()) -> {ok, Btree2::cbtree()}.
 add_remove(Bt, InsertKeyValues, RemoveKeys) ->
     {ok, [], Bt2} = query_modify(Bt, [], InsertKeyValues, RemoveKeys),
     {ok, Bt2}.
 
 %% @doc insert and remove a list of key/values and retrieve a list of
 %% key/values from their key in the btree in one call.
--spec query_modify(Btree::cbtree(), LookupKeys::cbt_keys(),
-                   InsertKeyValues::cbt_kvs(), RemoveKeys::cbt_keys()) ->
-    {ok, FoundKeyValues::cbt_kvs(), Btree2::cbtree()}.
+-spec query_modify(Btree::cbtree(), LookupKeys::cowdb_keys(),
+                   InsertKeyValues::cowdb_kvs(), RemoveKeys::cowdb_keys()) ->
+    {ok, FoundKeyValues::cowdb_kvs(), Btree2::cbtree()}.
 query_modify(Bt, LookupKeys, InsertValues, RemoveKeys) ->
     #btree{root=Root} = Bt,
     InsertActions = lists:map(
@@ -168,7 +238,7 @@ query_modify(Bt, LookupKeys, InsertValues, RemoveKeys) ->
 %% @doc lookup for a list of keys in the btree
 %% Results are returned in the same order as the keys. If the key is
 %% not_found the `not_found' result is appended to the list.
--spec lookup(Btree::cbtree(), Keys::cbt_keys()) -> [{ok, cbt_kv()} | not_found].
+-spec lookup(Btree::cbtree(), Keys::cowdb_keys()) -> [{ok, cowdb_kv()} | not_found].
 lookup(#btree{root=Root, less=Less}=Bt, Keys) ->
     SortedKeys = case Less of
         undefined -> lists:sort(Keys);
@@ -178,7 +248,7 @@ lookup(#btree{root=Root, less=Less}=Bt, Keys) ->
     % We want to return the results in the same order as the keys were input
     % but we may have changed the order when we sorted. So we need to put the
     % order back into the results.
-    cbt_util:reorder_results(Keys, SortedResults).
+    cowdb_util:reorder_results(Keys, SortedResults).
 
 lookup(_Bt, nil, Keys) ->
     {ok, [{Key, not_found} || Key <- Keys]};
@@ -194,20 +264,20 @@ lookup(Bt, Node, Keys) ->
 
 %% @doc fold key/values in the btree
 -spec fold(Btree::cbtree(), Fun::fun(), Acc::term()) ->
-    {ok, {KVs::cbt_kvs(), Reductions::[term()]}, Acc2::term()}.
+    {ok, {KVs::cowdb_kvs(), Reductions::[term()]}, Acc2::term()}.
 fold(Bt, Fun, Acc) ->
     fold(Bt, Fun, Acc, []).
 
 -spec fold(Btree::cbtree(), Fun::fun(), Acc::term(),
-           Options::cbt_fold_options()) ->
-    {ok, {KVs::cbt_kvs(), Reductions::[term()]}, Acc2::term()}.
+           Options::cowdb_fold_options()) ->
+    {ok, {KVs::cowdb_kvs(), Reductions::[term()]}, Acc2::term()}.
 fold(#btree{root=nil}, _Fun, Acc, _Options) ->
     {ok, {[], []}, Acc};
 fold(#btree{root=Root}=Bt, Fun, Acc, Options) ->
-    Dir = cbt_util:get_value(dir, Options, fwd),
+    Dir = cowdb_util:get_value(dir, Options, fwd),
     InRange = make_key_in_end_range_function(Bt, Dir, Options),
     Result =
-    case cbt_util:get_value(start_key, Options) of
+    case cowdb_util:get_value(start_key, Options) of
     undefined ->
         stream_node(Bt, [], Bt#btree.root, InRange, Dir,
                 convert_fun_arity(Fun), Acc);
@@ -242,12 +312,12 @@ do_final_reduce(Reduce, {KVs, Reductions}) ->
 %% @doc fold reduce values.
 %%
 -spec fold_reduce(Btree::cbtree(), FoldFun::fun(), Acc::any(),
-                    Options::cbt_fold_options()) -> {ok, Acc2::term()}.
+                    Options::cowdb_fold_options()) -> {ok, Acc2::term()}.
 fold_reduce(#btree{root=Root}=Bt, Fun, Acc, Options) ->
-    Dir = cbt_util:get_value(dir, Options, fwd),
-    StartKey = cbt_util:get_value(start_key, Options),
+    Dir = cowdb_util:get_value(dir, Options, fwd),
+    StartKey = cowdb_util:get_value(start_key, Options),
     InEndRangeFun = make_key_in_end_range_function(Bt, Dir, Options),
-    KeyGroupFun = cbt_util:get_value(key_group_fun, Options, fun(_,_) -> true end),
+    KeyGroupFun = cowdb_util:get_value(key_group_fun, Options, fun(_,_) -> true end),
     try
         {ok, Acc2, GroupedRedsAcc2, GroupedKVsAcc2, GroupedKey2} =
             reduce_stream_node(Bt, Dir, Root, StartKey, InEndRangeFun, undefined, [], [],
@@ -308,9 +378,9 @@ convert_fun_arity(Fun) when is_function(Fun, 4) ->
     Fun.    % Already arity 4
 
 make_key_in_end_range_function(Bt, fwd, Options) ->
-    case cbt_util:get_value(end_key_gt, Options) of
+    case cowdb_util:get_value(end_key_gt, Options) of
     undefined ->
-        case cbt_util:get_value(end_key, Options) of
+        case cowdb_util:get_value(end_key, Options) of
         undefined ->
             fun(_Key) -> true end;
         LastKey ->
@@ -320,9 +390,9 @@ make_key_in_end_range_function(Bt, fwd, Options) ->
         fun(Key) -> less(Bt, Key, EndKey) end
     end;
 make_key_in_end_range_function(Bt, rev, Options) ->
-    case cbt_util:get_value(end_key_gt, Options) of
+    case cowdb_util:get_value(end_key_gt, Options) of
     undefined ->
-        case cbt_util:get_value(end_key, Options) of
+        case cowdb_util:get_value(end_key, Options) of
         undefined ->
             fun(_Key) -> true end;
         LastKey ->
@@ -462,7 +532,7 @@ reduce_tree_size(kp_node, NodeSize, [{_K, {_P, _Red, Sz}} | NodeList]) ->
 
 
 get_node(#btree{fd = Fd}, NodePos) ->
-    {ok, {NodeType, NodeList}} = cbt_file:pread_term(Fd, NodePos),
+    {ok, {NodeType, NodeList}} = cowdb_file:pread_term(Fd, NodePos),
     {NodeType, NodeList}.
 
 write_node(#btree{fd = Fd, compression = Comp} = Bt, NodeType, NodeList) ->
@@ -471,7 +541,7 @@ write_node(#btree{fd = Fd, compression = Comp} = Bt, NodeType, NodeList) ->
     % now write out each chunk and return the KeyPointer pairs for those nodes
     ResultList = [
         begin
-            {ok, Pointer, Size} = cbt_file:append_term(
+            {ok, Pointer, Size} = cowdb_file:append_term(
                 Fd, {NodeType, ANodeList}, [{compression, Comp}]),
             {LastKey, _} = lists:last(ANodeList),
             SubTreeSize = reduce_tree_size(NodeType, Size, ANodeList),

@@ -35,8 +35,8 @@ test()->
         (rereduce, Reds) -> lists:sum(Reds)
     end,
 
-    {ok, Fd} = cbt_file:open(filename(), [create,overwrite]),
-    {ok, Btree} = cbt_btree:open(nil, Fd, [{reduce, ReduceFun}]),
+    {ok, Fd} = cowdb_file:open(filename(), [create,overwrite]),
+    {ok, Btree} = cowdb_btree:open(nil, Fd, [{reduce, ReduceFun}]),
 
     % Create a list, of {"even", Value} or {"odd", Value} pairs.
     {_, EvenOddKVs} = lists:foldl(fun(Idx, {Key, Acc}) ->
@@ -46,11 +46,11 @@ test()->
         end
     end, {"odd", []}, lists:seq(1, rows())),
 
-    {ok, Btree2} = cbt_btree:add_remove(Btree, EvenOddKVs, []),
+    {ok, Btree2} = cowdb_btree:add_remove(Btree, EvenOddKVs, []),
 
     GroupFun = fun({K1, _}, {K2, _}) -> K1 == K2 end,
     FoldFun = fun(GroupedKey, Unreduced, Acc) ->
-        {ok, [{GroupedKey, cbt_btree:final_reduce(Btree2, Unreduced)} | Acc]}
+        {ok, [{GroupedKey, cowdb_btree:final_reduce(Btree2, Unreduced)} | Acc]}
     end,
 
     {SK1, EK1} = {{"even", -1}, {"even", foo}},
@@ -63,7 +63,7 @@ test()->
             (_) ->
                 false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}]),
         "Reduction works with no specified direction, startkey, or endkey."
     ),
 
@@ -74,7 +74,7 @@ test()->
             (_) ->
                 false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}, {dir, fwd}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}, {dir, fwd}]),
         "Reducing forward works with no startkey or endkey."
     ),
 
@@ -85,7 +85,7 @@ test()->
             (_) ->
                 false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}, {dir, rev}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{key_group_fun, GroupFun}, {dir, rev}]),
         "Reducing backwards works with no startkey or endkey."
     ),
 
@@ -96,7 +96,7 @@ test()->
             (_) ->
                 false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK1}, {end_key, EK2}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK1}, {end_key, EK2}]),
         "Reducing works over the entire range with startkey and endkey set."
     ),
 
@@ -105,7 +105,7 @@ test()->
             ({ok, [{{"even", _}, 500}]}) -> true;
             (_) -> false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK1}, {end_key, EK1}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK1}, {end_key, EK1}]),
         "Reducing forward over first half works with a startkey and endkey."
     ),
 
@@ -114,7 +114,7 @@ test()->
             ({ok, [{{"odd", _}, 500}]}) -> true;
             (_) -> false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK2}, {end_key, EK2}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{dir, fwd}, {key_group_fun, GroupFun}, {start_key, SK2}, {end_key, EK2}]),
         "Reducing forward over second half works with second startkey and endkey"
     ),
 
@@ -123,7 +123,7 @@ test()->
             ({ok, [{{"odd", _}, 500}]}) -> true;
             (_) -> false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{dir, rev}, {key_group_fun, GroupFun}, {start_key, EK2}, {end_key, SK2}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{dir, rev}, {key_group_fun, GroupFun}, {start_key, EK2}, {end_key, SK2}]),
         "Reducing in reverse works after swapping the startkey and endkey."
     ),
 
@@ -134,12 +134,12 @@ test()->
             (_) ->
                 false
         end,
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [{dir, rev}, {key_group_fun, GroupFun}, {start_key, EK2}, {end_key, SK1}]),
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [{dir, rev}, {key_group_fun, GroupFun}, {start_key, EK2}, {end_key, SK1}]),
         "Reducing in reverse results in reversed accumulator."
     ),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 0}}, {end_key, {"odd", rows() + 1}}
         ]),
@@ -147,7 +147,7 @@ test()->
         "Right fold reduce value for whole range with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 0}}, {end_key_gt, {"odd", 999}}
         ]),
@@ -155,7 +155,7 @@ test()->
         "Right fold reduce value for whole range without inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 999}}, {end_key, {"even", 2}}
         ]),
@@ -163,7 +163,7 @@ test()->
         "Right fold reduce value for whole reversed range with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 999}}, {end_key_gt, {"even", 2}}
         ]),
@@ -171,7 +171,7 @@ test()->
         "Right fold reduce value for whole reversed range without inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 0}}, {end_key, {"odd", 499}}
         ]),
@@ -179,7 +179,7 @@ test()->
         "Right fold reduce value for first half with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 0}}, {end_key_gt, {"odd", 499}}
         ]),
@@ -187,7 +187,7 @@ test()->
         "Right fold reduce value for first half without inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 999}}, {end_key, {"even", 500}}
         ]),
@@ -195,7 +195,7 @@ test()->
         "Right fold reduce value for first half reversed with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 999}}, {end_key_gt, {"even", 500}}
         ]),
@@ -203,7 +203,7 @@ test()->
         "Right fold reduce value for first half reversed without inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 500}}, {end_key, {"odd", 999}}
         ]),
@@ -211,7 +211,7 @@ test()->
         "Right fold reduce value for second half with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, fwd}, {key_group_fun, GroupFun},
             {start_key, {"even", 500}}, {end_key_gt, {"odd", 999}}
         ]),
@@ -219,7 +219,7 @@ test()->
         "Right fold reduce value for second half without inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 501}}, {end_key, {"even", 2}}
         ]),
@@ -227,11 +227,11 @@ test()->
         "Right fold reduce value for second half reversed with inclusive end key"),
 
     etap:is(
-        cbt_btree:fold_reduce(Btree2, FoldFun, [], [
+        cowdb_btree:fold_reduce(Btree2, FoldFun, [], [
             {dir, rev}, {key_group_fun, GroupFun},
             {start_key, {"odd", 501}}, {end_key_gt, {"even", 2}}
         ]),
         {ok, [{{"even", 1000}, 499}, {{"odd", 501}, 251}]},
         "Right fold reduce value for second half reversed without inclusive end key"),
 
-    cbt_file:close(Fd).
+    cowdb_file:close(Fd).

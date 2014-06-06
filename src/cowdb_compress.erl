@@ -10,11 +10,11 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(cbt_compress).
+-module(cowdb_compress).
 
 -export([compress/2, decompress/1, is_compressed/2]).
 
--include("cbt.hrl").
+-include("cowdb.hrl").
 
 % binaries compressed with snappy have their first byte set to this value
 -define(SNAPPY_PREFIX, 1).

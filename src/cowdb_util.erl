@@ -10,7 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
--module(cbt_util).
+-module(cowdb_util).
 
 -export([should_flush/0, should_flush/1]).
 -export([rand32/0, implode/2]).
@@ -34,7 +34,7 @@
 -define(MD5_FINAL(Ctx), crypto:hash_final(Ctx)).
 -endif.
 
--include("cbt.hrl").
+-include("cowdb.hrl").
 
 % arbitrarily chosen amount of memory to use before flushing to disk
 -define(FLUSH_MAX_MEM, 10000000).
@@ -153,7 +153,7 @@ md5_final(Ctx) ->
 
 % linear search is faster for small lists, length() is 0.5 ms for 100k list
 reorder_results(Keys, SortedResults) when length(Keys) < 100 ->
-    [cbt_util:get_value(Key, SortedResults) || Key <- Keys];
+    [cowdb_util:get_value(Key, SortedResults) || Key <- Keys];
 reorder_results(Keys, SortedResults) ->
     KeyDict = dict:from_list(SortedResults),
     [dict:fetch(Key, KeyDict) || Key <- Keys].

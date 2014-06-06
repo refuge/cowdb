@@ -14,7 +14,7 @@
 % the License.
 
 filename() -> test_util:build_file("t/temp.012").
-sizeblock() -> 4096. % Need to keep this in sync with cbt_file.erl
+sizeblock() -> 4096. % Need to keep this in sync with cowdb_file.erl
 
 main(_) ->
     test_util:init_code_path(),
@@ -32,120 +32,120 @@ main(_) ->
     ok.
 
 test() ->
-    {ok, Fd} = cbt_file:open(filename(), [create,overwrite]),
+    {ok, Fd} = cowdb_file:open(filename(), [create,overwrite]),
 
-    etap:is({ok, 0}, cbt_file:bytes(Fd),
+    etap:is({ok, 0}, cowdb_file:bytes(Fd),
         "File should be initialized to contain zero bytes."),
 
-    etap:is({ok, 0}, cbt_file:write_header(Fd, {<<"some_data">>, 32}),
+    etap:is({ok, 0}, cowdb_file:write_header(Fd, {<<"some_data">>, 32}),
         "Writing a header succeeds."),
 
-    {ok, Size1} = cbt_file:bytes(Fd),
+    {ok, Size1} = cowdb_file:bytes(Fd),
     etap:is_greater(Size1, 0,
         "Writing a header allocates space in the file."),
 
-    etap:is({ok, {<<"some_data">>, 32}, 0}, cbt_file:read_header(Fd),
+    etap:is({ok, {<<"some_data">>, 32}, 0}, cowdb_file:read_header(Fd),
         "Reading the header returns what we wrote."),
 
-    etap:is({ok, 4096}, cbt_file:write_header(Fd, [foo, <<"more">>]),
+    etap:is({ok, 4096}, cowdb_file:write_header(Fd, [foo, <<"more">>]),
         "Writing a second header succeeds."),
 
-    {ok, Size2} = cbt_file:bytes(Fd),
+    {ok, Size2} = cowdb_file:bytes(Fd),
     etap:is_greater(Size2, Size1,
         "Writing a second header allocates more space."),
 
-    etap:is({ok, [foo, <<"more">>], 4096}, cbt_file:read_header(Fd),
+    etap:is({ok, [foo, <<"more">>], 4096}, cowdb_file:read_header(Fd),
         "Reading the second header does not return the first header."),
 
     % Delete the second header.
-    ok = cbt_file:truncate(Fd, Size1),
+    ok = cowdb_file:truncate(Fd, Size1),
 
-    etap:is({ok, {<<"some_data">>, 32}, 0}, cbt_file:read_header(Fd),
+    etap:is({ok, {<<"some_data">>, 32}, 0}, cowdb_file:read_header(Fd),
         "Reading the header after a truncation returns a previous header."),
 
-    cbt_file:write_header(Fd, [foo, <<"more">>]),
-    etap:is({ok, Size2}, cbt_file:bytes(Fd),
+    cowdb_file:write_header(Fd, [foo, <<"more">>]),
+    etap:is({ok, Size2}, cowdb_file:bytes(Fd),
         "Rewriting the same second header returns the same second size."),
 
-    cbt_file:write_header(Fd, erlang:make_tuple(5000, <<"CouchDB">>)),
+    cowdb_file:write_header(Fd, erlang:make_tuple(5000, <<"CouchDB">>)),
     etap:is(
-        cbt_file:read_header(Fd),
+        cowdb_file:read_header(Fd),
         {ok, erlang:make_tuple(5000, <<"CouchDB">>), 8192},
         "Headers larger than the block size can be saved (COUCHDB-1319)"
     ),
 
-    ok = cbt_file:close(Fd),
+    ok = cowdb_file:close(Fd),
 
     % Now for the fun stuff. Try corrupting the second header and see
     % if we recover properly.
 
     % Destroy the 0x1 byte that marks a header
     check_header_recovery(fun(CouchFd, RawFd, Expect, HeaderPos) ->
-        etap:isnt(Expect, cbt_file:read_header(CouchFd),
+        etap:isnt(Expect, cowdb_file:read_header(CouchFd),
             "Should return a different header before corruption."),
         file:pwrite(RawFd, HeaderPos, <<0>>),
-        etap:is(Expect, cbt_file:read_header(CouchFd),
+        etap:is(Expect, cowdb_file:read_header(CouchFd),
             "Corrupting the byte marker should read the previous header.")
     end),
 
     % Corrupt the size.
     check_header_recovery(fun(CouchFd, RawFd, Expect, HeaderPos) ->
-        etap:isnt(Expect, cbt_file:read_header(CouchFd),
+        etap:isnt(Expect, cowdb_file:read_header(CouchFd),
             "Should return a different header before corruption."),
         % +1 for 0x1 byte marker
         file:pwrite(RawFd, HeaderPos+1, <<10/integer>>),
-        etap:is(Expect, cbt_file:read_header(CouchFd),
+        etap:is(Expect, cowdb_file:read_header(CouchFd),
             "Corrupting the size should read the previous header.")
     end),
 
     % Corrupt the MD5 signature
     check_header_recovery(fun(CouchFd, RawFd, Expect, HeaderPos) ->
-        etap:isnt(Expect, cbt_file:read_header(CouchFd),
+        etap:isnt(Expect, cowdb_file:read_header(CouchFd),
             "Should return a different header before corruption."),
         % +5 = +1 for 0x1 byte and +4 for term size.
         file:pwrite(RawFd, HeaderPos+5, <<"F01034F88D320B22">>),
-        etap:is(Expect, cbt_file:read_header(CouchFd),
+        etap:is(Expect, cowdb_file:read_header(CouchFd),
             "Corrupting the MD5 signature should read the previous header.")
     end),
 
     % Corrupt the data
     check_header_recovery(fun(CouchFd, RawFd, Expect, HeaderPos) ->
-        etap:isnt(Expect, cbt_file:read_header(CouchFd),
+        etap:isnt(Expect, cowdb_file:read_header(CouchFd),
             "Should return a different header before corruption."),
         % +21 = +1 for 0x1 byte, +4 for term size and +16 for MD5 sig
         file:pwrite(RawFd, HeaderPos+21, <<"some data goes here!">>),
-        etap:is(Expect, cbt_file:read_header(CouchFd),
+        etap:is(Expect, cowdb_file:read_header(CouchFd),
             "Corrupting the header data should read the previous header.")
     end),
 
     ok.
 
 check_header_recovery(CheckFun) ->
-    {ok, Fd} = cbt_file:open(filename(), [create,overwrite]),
+    {ok, Fd} = cowdb_file:open(filename(), [create,overwrite]),
     {ok, RawFd} = file:open(filename(), [read, write, raw, binary]),
 
     {ok, _} = write_random_data(Fd),
     ExpectHeader = {some_atom, <<"a binary">>, 756},
-    {ok, ValidHeaderPos} = cbt_file:write_header(Fd, ExpectHeader),
+    {ok, ValidHeaderPos} = cowdb_file:write_header(Fd, ExpectHeader),
 
     {ok, HeaderPos} = write_random_data(Fd),
-    {ok, _} = cbt_file:write_header(Fd, {2342, <<"corruption! greed!">>}),
+    {ok, _} = cowdb_file:write_header(Fd, {2342, <<"corruption! greed!">>}),
 
     CheckFun(Fd, RawFd, {ok, ExpectHeader, ValidHeaderPos}, HeaderPos),
 
     ok = file:close(RawFd),
-    ok = cbt_file:close(Fd),
+    ok = cowdb_file:close(Fd),
     ok.
 
 write_random_data(Fd) ->
     write_random_data(Fd, 100 + random:uniform(1000)).
 
 write_random_data(Fd, 0) ->
-    {ok, Bytes} = cbt_file:bytes(Fd),
+    {ok, Bytes} = cowdb_file:bytes(Fd),
     {ok, (1 + Bytes div sizeblock()) * sizeblock()};
 write_random_data(Fd, N) ->
     Choices = [foo, bar, <<"bizzingle">>, "bank", ["rough", stuff]],
     Term = lists:nth(random:uniform(4) + 1, Choices),
-    {ok, _, _} = cbt_file:append_term(Fd, Term),
+    {ok, _, _} = cowdb_file:append_term(Fd, Term),
     write_random_data(Fd, N-1).
 
