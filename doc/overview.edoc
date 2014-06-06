@@ -1,29 +1,29 @@
-title cbt - couchdb btree library 
-@author Benoit Chesnewu <benoitc@refuge.io>
+title cowdb - copy-on-write object database
+@author Benoit Chesneau <benoitc@refuge.io>
   [http://refuge.io/]
 @copyright 2014 Benoit Chesneau (Apache 2 License)
 
-@doc cbt is a multi-layer MVCC log append-only database based on the Apache CouchDB btree.
+@doc cowdb is an object database based on the Apache CouchDB btree.
 
 
 The source code can be obtained from <a
-href="https://bitbucket.org/refugeio/cbt">the bitbucket repo</a>.
+href="https://bitbucket.org/refugeio/cowdb">the bitbucket repo</a>.
 
 Included modules are:
 
 <dl>
-    <dt>{@link cbt_file}</dt>
+    <dt>{@link cowdb_file}</dt>
     <dd>
         File module used by other module.
     </dd>
 
-    <dt>{@link cbt_btree}</dt>
+    <dt>{@link cowdb_btree}</dt>
     <dd>
         Main module to write and query multiple btree in a file created
-with the cbt_file module.
+with the cow_file module.
     </dd>
 
-    <dt>{@link cbt_stream}</dt>
+    <dt>{@link cowdb_stream}</dt>
     <dd>
         module to store a large binary (stream) in the database file and
 get the list of each chunk.
@@ -33,68 +33,4 @@ get the list of each chunk.
 
 Example of usage:
 
-Store a {Key Value} pair in a btree:
-
-```
-1> {ok, Fd} = cbt_file:open("test.db").   
-{ok,<0.35.0>}
-2> {ok, Btree} = cbt_btree:new(Fd).
-{ok,{btree,<0.35.0>,nil,undefined,undefined,undefined,nil,
-           snappy,1279}}
-3> 
-3> {ok, Btree2} = cbt_btree:add(Btree, [{a, 1}]).
-{ok,{btree,<0.35.0>,
-           {0,[],32},
-           undefined,undefined,undefined,nil,snappy,1279}}
-4> Root = cbt_btree:get_state(Btree2).
-{0,[],32}
-5> Header = {1, Root}.
-{1,{0,[],32}}
-6> cbt_file:write_header(Fd, Header).
-ok
-```
-
-What we did here is to open a file, create a btree inside and add a key
-value. Until we write the header, the database value is not changed.
-
-Now open the database in a new process and read the btree using the last
-header:
-
-```
-7> {ok, Fd1} = cbt_file:open("test.db"). 
-{ok,<0.44.0>}
-8> 
-8> {ok, Header1} = cbt_file:read_header(Fd1).
-{ok,{1,{0,[],32}}}
-9> Header1 == Header 
-9> .
-true
-10> {_, ReaderRoot} = Header1.   
-{1,{0,[],32}}
-11> {ok, SnapshotBtree} = cbt_btree:open(ReaderRoot, Fd1).
-{ok,{btree,<0.44.0>,
-           {0,[],32},
-           undefined,undefined,undefined,nil,snappy,1279}}
-12> cbt_btree:lookup(SnapshotBtree, [a]).
-[{ok,{a,1}}]
-```
-
-You can check that the database value is not change until we store the
-header:
-
-```
-13> {ok, Btree4} = cbt_btree:add(Btree2, [{a, 1}, {b, 2}]).
-{ok,{btree,<0.35.0>,
-           {4160,[],39},
-           undefined,undefined,undefined,nil,snappy,1279}}
-14> cbt_btree:lookup(Btree4, [a, b]).
-[{ok,{a,1}},{ok,{b,2}}]
-15> Root2 = cbt_btree:get_state(Btree4).
-{4160,[],39}
-16> Header2 = {1, Root2}.
-{1,{4160,[],39}}
-17> cbt_file:write_header(Fd, Header2).
-ok
-18> cbt_btree:lookup(SnapshotBtree, [a, b]).
-[{ok,{a,1}},not_found]
-'''
+Coming...
