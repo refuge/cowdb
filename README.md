@@ -5,7 +5,7 @@ copy-on-write object database based on the Apache CouchDB btree.
 ## build
 
 ### 1. install rebar
-To build cbt you need to install rebar in your `PATH`. Rebar is
+To build cowdb you need to install rebar in your `PATH`. Rebar is
 available on Github:
 
 https://github.com/rebar/rebar
