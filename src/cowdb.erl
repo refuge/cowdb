@@ -16,10 +16,16 @@
 
 
 -export([open/2, open/3, open_link/2, open_link/3]).
--export([init_store/2, init_store/3,
-         open_store/2,
+-export([open_store/2, open_store/3,
          delete_store/2,
          stores/1]).
+
+-export([get/2, get/3,
+         lookup/2, lookup/3,
+         add/2, add/3,
+         remove/2, remove/3,
+         add_remove/3, add_remove/4,
+         transact/2]).
 
 %% gen server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -55,31 +61,22 @@ open_link(FilePath, InitFunc, Options) ->
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
--spec init_store(db(), storeid()) ->
+-spec open_store(db(), storeid()) ->
     {ok, store(), db()}
     | store_already_defined
     | {error, term()}.
-init_store(Db, StoreId) ->
-    init_store(Db, StoreId, []).
+open_store(Db, StoreId) ->
+    open_store(Db, StoreId, []).
 
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
--spec init_store(db(), storeid(), cowdb_store:store_options()) ->
+-spec open_store(db(), storeid(), cowdb_store:store_options()) ->
     {ok, store(), db()}
     | store_already_defined
     | {error, term()}.
-init_store(Db, StoreId, Options) ->
-    cowdb_store:init(Db, StoreId, Options).
-
-%% @doc open a store to be used in transactions. When open in an update
-%% transaction function you will only be able to use it to query the
-%% data.
--spec open_store(cowdb:db(), cowdb:storeid()) ->
-    {ok, cowdb:store()}
-    | undefined.
-open_store(Db, StoreId) ->
-    cowdb_store:open(Db, StoreId).
+open_store(Db, StoreId, Options) ->
+    cowdb_store:open(Db, StoreId, Options).
 
 %% delete a store in the database. It can only happen on a version
 %% change transaction.
@@ -94,6 +91,65 @@ delete_store(Db, StoreId) ->
 -spec stores(pid()) -> [term()].
 stores(Db) ->
     gen_server:call(Db, stores).
+
+
+get({Ref, StoreId}, Key) ->
+    get(Ref, StoreId, Key).
+
+get(Ref, StoreId, Key) ->
+    [Val] = lookup(Ref, StoreId, [Key]),
+    Val.
+
+lookup({Ref, StoreId}, Keys) ->
+    lookup(Ref, StoreId, Keys).
+
+lookup(DbPid, StoreId, Keys) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    lookup(Db, StoreId, Keys);
+lookup(#db{reader_fd=Fd, stores=Stores}, StoreId, Keys) ->
+    case lists:keyfind(StoreId, 1, Stores) of
+        false -> unknown_store;
+        {StoreId, Store} ->
+            cowdb_btree:lookup(Store#btree{fd=Fd}, Keys)
+    end.
+
+
+
+add({Ref, StoreId}, Value) ->
+    add(Ref, StoreId, Value).
+
+add(Ref, StoreId, Value) ->
+    transact(Ref, [{add, StoreId, Value}]).
+
+remove({Ref, StoreId}, Key) ->
+    remove(Ref, StoreId, Key).
+
+remove(Ref, StoreId, Key) ->
+    transact(Ref, [{remove, StoreId, Key}]).
+
+add_remove({Ref, StoreId}, ToAdd, ToRemove) ->
+    add_remove(Ref, StoreId, ToAdd, ToRemove).
+
+add_remove(Ref, StoreId, ToAdd, ToRemove) ->
+    transact(Ref, [{add_remove, StoreId, ToAdd, ToRemove}]).
+
+transact(Ref, Ops) ->
+    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
+    Tag = erlang:monitor(process, UpdaterPid),
+    try
+        UpdaterPid ! {transact, Ops, self(), Tag},
+        receive
+            {Tag, Resp} ->
+                Resp;
+            {'DOWN', Tag, _, _, Reason} ->
+                error_logger:error_msg("updater pid exited with reason ~p~n",
+                                       [Reason]),
+                {error, Reason}
+        end
+    after
+        erlang:demonitor(Tag, [flush])
+    end.
+
 
 %% --------------------
 %% gen_server callbacks
@@ -126,6 +182,11 @@ handle_call(stores, _From, #db{stores=Stores}=Db) ->
     Names = [K || {K, _Store} <- Stores],
     {reply, Names, Db};
 
+handle_call(get_updater, _From, #db{updater_pid=UpdaterPid}=Db) ->
+    {reply, UpdaterPid, Db};
+
+handle_call({db_updated, Db}, _From, _State) ->
+    {reply, ok, Db};
 
 handle_call(_Msg, _From, State) ->
     {noreply, State}.

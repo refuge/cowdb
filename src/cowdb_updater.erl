@@ -69,6 +69,27 @@ handle_call(_Msg, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info({transact, Ops, Parent, Tag}, #db{db_pid=DbPid}=Db) ->
+    %% execute the transaction
+    Resp = do_transaction(fun() ->
+                    catch run_transaction(Ops, Db, Db)
+            end, update),
+
+    %% return the result
+    Db2 = case Resp of
+        {ok, Db1} ->
+            %% send to the db the latesr
+            ok = gen_server:call(DbPid, {db_updated, Db1}, infinity),
+
+            Parent ! {Tag, ok},
+            Db1;
+        Error ->
+            Parent ! {Tag, Error},
+            Db
+    end,
+    {noreply, Db2};
+
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -135,20 +156,82 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
 
     %% initialise the database with the init function.
     {ok, Db} = do_transaction(fun() ->
-                    call_init(InitFunc, InitStatus, Db0)
+                    case call_init(InitFunc, InitStatus, Db0) of
+                        {ok, Db2} ->
+                            {ok, Db2};
+                        {ok, Db2, Ops} ->
+                            %% an init function can return an initial
+                            %% transaction.
+                            run_transaction(Ops, Db2, Db2);
+                        Error ->
+                            Error
+                    end
             end, version_change),
-
     Db.
+
+
+run_transaction([], Db, _DbSnapshot) ->
+    {ok, Db};
+run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
+    %% add a value
+    case get_store(StoreId, Db) of
+        {ok, Store} ->
+            {ok, Store2} = cowdb_btree:add(Store, [Value]),
+            Db2 = set_store(StoreId, Store2, Db),
+            run_transaction(Rest, Db2, DbSnapshot);
+        false ->
+            {error, {unknown_store, StoreId}}
+    end;
+run_transaction([{remove, StoreId, Key} | Rest],  Db, DbSnapshot) ->
+    %% remove a key
+    case get_store(StoreId, Db) of
+        {ok, Store} ->
+            {ok, Store2} = cowdb_btree:add_remove(Store, [], [Key]),
+            Db2 = set_store(StoreId, Store2, Db),
+            run_transaction(Rest, Db2, DbSnapshot);
+        false ->
+            {error, {unknown_store, StoreId}}
+    end;
+run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db,
+                DbSnapshot) ->
+    %% add a list of keys and remove them at the same time.
+    case get_store(StoreId, Db) of
+        {ok, Store} ->
+            {ok, Store2} = cowdb_btree:add_remove(Store, ToAdd, ToRemove),
+            Db2 = set_store(StoreId, Store2, Db),
+            run_transaction(Rest, Db2, DbSnapshot);
+        false ->
+            {error, {unknown_store, StoreId}}
+    end;
+run_transaction([{fn, Func} | Rest], Db, DbSnapshot) ->
+    %% execute a transaction function
+    Ops = case Func of
+        {M, F, A} ->
+            erlang:apply(M, F, [DbSnapshot | A]);
+        {M, F} ->
+            M:F(DbSnapshot);
+        F ->
+            F(DbSnapshot)
+    end,
+
+    {ok, Db2} = run_transaction(Ops, Db, DbSnapshot),
+    run_transaction(Rest, Db2, DbSnapshot);
+run_transaction(_, _, _) ->
+    {error, unknown_op}.
+
 
 do_transaction(Fun, Status) ->
     erlang:put(cowdb_trans, Status),
-    {ok, Db} = try
-        Fun()
+    try
+        case catch Fun() of
+            {ok, Db} ->
+                commit_transaction(Status, Db);
+            Error ->
+                Error
+        end
     after
         erlang:erase(cowdb_trans)
-    end,
-    commit_transaction(Status, Db).
-
+    end.
 
 %% TODO: improve the transacton commit to make it faster.
 commit_transaction(version_change, #db{fd=Fd, root=Root, stores=Stores,
@@ -183,12 +266,25 @@ commit_transaction(_,  #db{fd=Fd, root=Root, stores=Stores,
     %% write the header
     NewHeader = OldHeader#db_header{root=cowdb_btree:get_state(Root2)},
     {ok, _} = cowdb_file:write_header(Fd, NewHeader),
-    {ok, Db#db{root=Root2, header=NewHeader}}.
+    {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd0}}.
 
 
 call_init({M, F, A}, InitStatus, Db) ->
-    erlang:apply(M, F, [InitStatus, Db, A]);
+    erlang:apply(M, F, [InitStatus, Db | A]);
 call_init({M, F}, InitStatus, Db) ->
-    M:F(InitStatus, Db, []);
+    M:F(InitStatus, Db);
 call_init(InitFun, InitStatus, Db) ->
-    InitFun(InitStatus, Db, []).
+    InitFun(InitStatus, Db).
+
+
+get_store(StoreId, #db{stores=Stores}) ->
+    case lists:keyfind(StoreId, 1, Stores) of
+        false -> false;
+        {StoreId, Store} -> {ok, Store}
+    end.
+
+set_store(StoreId, Store,  #db{stores=[]}=Db) ->
+    Db#db{stores=[{StoreId, Store}]};
+set_store(StoreId, Store,  #db{stores=Stores}=Db) ->
+    NStores = lists:keyreplace(StoreId, 1, Stores, {StoreId, Store}),
+    Db#db{stores=NStores}.

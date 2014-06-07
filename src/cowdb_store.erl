@@ -12,8 +12,7 @@
 
 -module(cowdb_store).
 
--export([init/2, init/3]).
--export([open/2]).
+-export([open/2, open/3]).
 -export([delete/2]).
 
 -include("cowdb.hrl").
@@ -27,21 +26,21 @@
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
--spec init(cowdb:db(), cowdb:storeid()) ->
+-spec open(cowdb:db(), cowdb:storeid()) ->
     {ok, cowdb:store(), cowdb:db()}
     | store_already_defined
     | {error, term()}.
-init(Db, StoreId) ->
-    init(Db, StoreId, []).
+open(Db, StoreId) ->
+    open(Db, StoreId, []).
 
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
--spec init(cowdb:db(), cowdb:storeid(), store_options()) ->
+-spec open(cowdb:db(), cowdb:storeid(), store_options()) ->
     {ok, cowdb:store(), cowdb:db()}
     | store_already_defined
     | {error, term()}.
-init(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
+open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
     ?IF_TRANS(version_change, fun() ->
                 case proplists:get_value(StoreId, Stores, nil) of
                     #btree{} ->
@@ -58,36 +57,13 @@ init(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
                         end,
 
                         Db2 = Db#db{stores=NStores},
-                        {ok, {Db2, Store}, Db2}
+                        {ok, Db2}
                 end
 
         end);
-init(_, _, _) ->
+open(_, _, _) ->
     {error, bad_transaction_state}.
 
-
-%% @doc open a store to be used in transactions. When open in an update
-%% transaction function you will only be able to use it to query the
-%% data.
--spec open(cowdb:db(), cowdb:storeid()) ->
-    {ok, cowdb:store()}
-    | undefined.
-open(DbPid, StoreId) when is_pid(DbPid) ->
-    {ok, {DbPid, StoreId}};
-open(#db{reader_fd=ReaderFd, stores=Stores}=Db, StoreId) ->
-     case lists:keyfind(StoreId, 1, Stores) of
-        {_, Store1} ->
-            Store = case cowdb_updater:transaction_type() of
-                update ->
-                    %% btree is read only
-                    Store1#btree{fd=ReaderFd};
-                _ ->
-                    Store1
-            end,
-            {ok, {Db, Store}};
-        false ->
-            undefined
-    end.
 
 %% delete a store in the database. It can only happen on a version
 %% change transaction.
