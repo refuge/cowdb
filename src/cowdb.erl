@@ -22,6 +22,7 @@
 
 -export([get/2, get/3,
          lookup/2, lookup/3,
+         fold/3, fold/4, fold/5,
          add/2, add/3,
          remove/2, remove/3,
          add_remove/3, add_remove/4,
@@ -113,7 +114,24 @@ lookup(#db{reader_fd=Fd, stores=Stores}, StoreId, Keys) ->
             cowdb_btree:lookup(Store#btree{fd=Fd}, Keys)
     end.
 
+fold({Ref, StoreId}, Fun, Acc) ->
+    fold(Ref, StoreId, Fun, Acc, []).
 
+
+fold(DbPid, StoreId, Fun, Acc) when is_pid(DbPid) ->
+    fold(DbPid, StoreId, Fun, Acc, []);
+fold({Ref, StoreId}, Fun, Acc, Options) ->
+    fold(Ref, StoreId, Fun, Acc, Options).
+
+fold(DbPid, StoreId, Fun, Acc, Options) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    fold(Db, StoreId, Fun, Acc, Options);
+fold(#db{reader_fd=Fd, stores=Stores}, StoreId, Fun, Acc, Options) ->
+    case lists:keyfind(StoreId, 1, Stores) of
+        false -> unknown_store;
+        {StoreId, Store} ->
+            cowdb_btree:fold(Store#btree{fd=Fd}, Fun, Acc, Options)
+    end.
 
 add({Ref, StoreId}, Value) ->
     add(Ref, StoreId, Value).
