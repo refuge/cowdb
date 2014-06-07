@@ -23,8 +23,6 @@
     end).
 
 
--define(LATEST_DISK_VERSION, 1).
-
 -record(btree, {
     fd,
     root,
@@ -37,17 +35,31 @@
 }).
 
 
--record(db_header, {version = ?LATEST_DISK_VERSION,
-                    changes = 0,
-                    btrees = [],
-                    meta = []}).
 
--record(db, {db_pid,
+-define(DISK_VERSION, 1).
+
+-record(db_header, {version=?DISK_VERSION,
+                    db_version=1,
+                    root=nil}).
+
+-record(db, {version,
+             db_pid,
              updater_pid,
              fd,
-             btrees = [],
+             reader_fd,
+             root=nil,
+             stores= [],
+             old_stores=[],
+             db_mod,
              header,
-             dir,
-             btree_specs = [],
-             options,
+             file_path,
              fsync_options}).
+
+-record(store, {db,
+                id}).
+
+-define(IF_TRANS(Status, Fun),
+        case erlang:get(cowdb_trans) of
+            Status -> Fun();
+            Other -> {bad_transaction_state, Other}
+        end).
