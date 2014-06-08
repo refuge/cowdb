@@ -23,10 +23,10 @@ Fetch the source code:
 Build the source, run the `make` command. It will fetch any needed
 dependencies.
 
-    $ cd /<PATH_TO>/cbt
+    $ cd /<PATH_TO>/cowdb
     $ make
 
-### 3. test CBT
+### 3. test cowdb
 
 Run the following command line:
 
