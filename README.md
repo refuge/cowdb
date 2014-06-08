@@ -1,6 +1,21 @@
 #cowdb
 
-copy-on-write object database based on the Apache CouchDB btree.
+object database in pure Erlang.
+
+## Features
+
+- based on the Apache CouchDB btree
+- multiple store support
+- support transactions (add, remove operations on a 1 ore more store at once)
+- transaction function support: cowdbwill invoke database functions as part of transaction processing. Functions written for this purpose are called transaction functions.
+
+### Transaction functions:
+
+A transaction function must expect to be passed a database value as its first argument.
+This is to allow transaction function to issue queries etc. Other args can be given to it.
+
+Additionally, a transaction function must return transaction operations. (other functions can be part of it).
+
 
 ## build
 
