@@ -12,9 +12,15 @@ href="https://bitbucket.org/refugeio/cowdb">the bitbucket repo</a>.
 Included modules are:
 
 <dl>
+    <dt>{@link cowdb}</dt>
+    <dd>
+        Main module to use the database.
+    </dd>
+
     <dt>{@link cowdb_file}</dt>
     <dd>
-        File module used by other module.
+        File module used by the btree module. It manage all interactions
+with the filesystem.
     </dd>
 
     <dt>{@link cowdb_btree}</dt>
