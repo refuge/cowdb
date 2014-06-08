@@ -108,13 +108,7 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
     FSyncOptions = cowdb_util:get_opt(fsync_options, Options,
                                       DefaultFSyncOptions),
 
-    case lists:member(on_file_open, FSyncOptions) of
-        true ->
-            ok = cowdb_file:sync(Fd);
-        _ ->
-            ok
-    end,
-
+    ok = maybe_sync(on_file_open, Fd, FSyncOptions),
 
     #db_header{db_version=OldVersion,
                root=RootP} = Header,
@@ -139,7 +133,8 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
               root=Root,
               stores=lists:reverse(Stores),
               header=Header,
-              file_path=FilePath},
+              file_path=FilePath,
+              fsync_options=FSyncOptions},
 
 
     %% retrieve the initialisation status, check if the database need to
@@ -234,7 +229,7 @@ do_transaction(Fun, Status) ->
     end.
 
 %% TODO: improve the transacton commit to make it faster.
-commit_transaction(version_change, #db{fd=Fd, root=Root, stores=Stores,
+commit_transaction(version_change, #db{root=Root, stores=Stores,
                                        old_stores=OldStores,
                                        header=OldHeader}=Db) ->
 
@@ -250,13 +245,13 @@ commit_transaction(version_change, #db{fd=Fd, root=Root, stores=Stores,
 
     %% commit the transactions
     NewHeader = OldHeader#db_header{root=cowdb_btree:get_state(Root2)},
-    {ok, _} = cowdb_file:write_header(Fd, NewHeader),
+    ok = write_header(NewHeader, Db),
 
     %% return the new db
     {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd}};
-commit_transaction(_,  #db{fd=Fd, root=Root, stores=Stores,
-                            old_stores = OldStores,
-                            header=OldHeader}=Db) ->
+commit_transaction(_,  #db{root=Root, stores=Stores,
+                           old_stores = OldStores,
+                           header=OldHeader}=Db) ->
 
     %% look at updated root to only store their changes
     ToAdd0 = [{K, cowdb_btree:get_state(Btree)} || {K, Btree} <- Stores],
@@ -265,7 +260,7 @@ commit_transaction(_,  #db{fd=Fd, root=Root, stores=Stores,
     {ok, Root2} = cowdb_btree:add_remove(Root, ToAdd, []),
     %% write the header
     NewHeader = OldHeader#db_header{root=cowdb_btree:get_state(Root2)},
-    {ok, _} = cowdb_file:write_header(Fd, NewHeader),
+    ok = write_header(NewHeader, Db),
     {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd0}}.
 
 
@@ -288,3 +283,19 @@ set_store(StoreId, Store,  #db{stores=[]}=Db) ->
 set_store(StoreId, Store,  #db{stores=Stores}=Db) ->
     NStores = lists:keyreplace(StoreId, 1, Stores, {StoreId, Store}),
     Db#db{stores=NStores}.
+
+
+write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
+    ok = maybe_sync(before_header, Fd, FsyncOptions),
+    {ok, _} = cowdb_file:write_header(Fd, Header),
+    ok = maybe_sync(after_headerr, Fd, FsyncOptions),
+    ok.
+
+maybe_sync(Status, Fd, FSyncOptions) ->
+    case lists:member(Status, FSyncOptions) of
+        true ->
+            ok = cowdb_file:sync(Fd),
+            ok;
+        _ ->
+            ok
+    end.
