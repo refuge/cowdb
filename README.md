@@ -41,6 +41,29 @@ and open the `index.html` file in the doc folder. Or read it
 [online](http://refugeio.bitbucket.org/cowdb/index.html).
 
 
+Example of usage:
+
+        
+    1> {ok, Pid} = cowdb:open("testing.db",
+            1> fun(St, Db) -> cowdb:open_store(Db, "test") end).
+    {ok,<0.35.0>}
+    2> cowdb:lookup(Pid, "test", [a,b]).
+    [{ok,{a,1}},{ok,{b,2}}]
+    3> cowdb:lookup(Pid, "test", [a,b,c]).
+    [{ok,{a,1}},{ok,{b,2}},not_found]
+    4> cowdb:transact(Pid, [{remove, "test", b}, {add, "test", {c,
+            3}}]).
+    ok
+    5> cowdb:lookup(Pid, "test", [a,b,c]).
+    [{ok,{a,1}},not_found,{ok,{c,3}}]
+    6> cowdb:get(Pid, "test", a).
+    {ok,{a,1}}
+    7> cowdb:transact(Pid, [{fn, fun(Db) -> [{add, "test", {d, 2}}]
+            end}]).
+    ok
+    8> cowdb:lookup(Pid, "test", [d]).
+    [{ok,{d,2}}]
+
 ## contribute
 
 Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/COWDB
