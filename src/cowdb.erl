@@ -223,7 +223,7 @@ transact(Ref, Ops) ->
 %% gen_server callbacks
 %% --------------------
 
-
+%% @private
 init([FilePath, InitFunc, Options]) ->
      %% set openoptions
     OpenOptions = case proplists:get_value(override, Options, false) of
@@ -243,6 +243,7 @@ init([FilePath, InitFunc, Options]) ->
             Error
     end.
 
+%% @private
 handle_call(get_db, _From, Db) ->
     {reply, Db, Db};
 
@@ -259,14 +260,18 @@ handle_call({db_updated, Db}, _From, _State) ->
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
+%% @private
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+%% @private
 handle_info(_Info, State) ->
     {noreply, State}.
 
+%% @private
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
+%% @private
 terminate(_Reason, _State) ->
     ok.
