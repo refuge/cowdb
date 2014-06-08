@@ -42,17 +42,40 @@
 -opaque store() :: {db(), storeid()} | {db(), #btree{}}.
 -export_type([storeid/0, store/0]).
 
+%% @doc open a cowdb database, pass a function to initialise the stores and
+%% indexes.
+-spec open(FilePath::string(), InitFunc::function()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
 open(FilePath, InitFunc) ->
     open(FilePath, InitFunc, []).
 
+
+%% @doc open a cowdb database, pass a function to initialise the stores and
+%% indexes.
+-spec open(FilePath::string(), InitFunc::function(), Option::list()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
 open(FilePath, InitFunc, Options) ->
     SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
     gen_server:start(?MODULE, [FilePath, InitFunc, Options], SpawnOpts).
 
 
+%% @doc open a cowdb databas as part of the supervision treee, pass a
+%% function to initialise the stores and indexes.
+-spec open_link(FilePath::string(), InitFunc::function()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
 
 open_link(FilePath, InitFunc) ->
     open_link(FilePath, InitFunc, []).
+
+
+%% @doc open a cowdb database as art of the supervision tree, pass a
+%% function to initialise the stores and indexes.
+-spec open_link(FilePath::string(), InitFunc::function(), Option::list()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
 
 open_link(FilePath, InitFunc, Options) ->
     SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
@@ -94,6 +117,8 @@ stores(Db) ->
     gen_server:call(Db, stores).
 
 
+%% @doc get an object from its key
+-spec get(store(), Key::any()) -> {ok, any()} | {error, term()}.
 get({Ref, StoreId}, Key) ->
     get(Ref, StoreId, Key).
 
@@ -101,6 +126,8 @@ get(Ref, StoreId, Key) ->
     [Val] = lookup(Ref, StoreId, [Key]),
     Val.
 
+%% @doc get a list of object from theyir key
+-spec lookup(store(), Keys::[any()]) -> {ok, any()} | {error, term()}.
 lookup({Ref, StoreId}, Keys) ->
     lookup(Ref, StoreId, Keys).
 
@@ -114,6 +141,7 @@ lookup(#db{reader_fd=Fd, stores=Stores}, StoreId, Keys) ->
             cowdb_btree:lookup(Store#btree{fd=Fd}, Keys)
     end.
 
+%% @doc fold all objects form the dabase
 fold({Ref, StoreId}, Fun, Acc) ->
     fold(Ref, StoreId, Fun, Acc, []).
 
@@ -123,6 +151,9 @@ fold(DbPid, StoreId, Fun, Acc) when is_pid(DbPid) ->
 fold({Ref, StoreId}, Fun, Acc, Options) ->
     fold(Ref, StoreId, Fun, Acc, Options).
 
+
+
+%% @doc fold all objects form the dabase with range options
 fold(DbPid, StoreId, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     fold(Db, StoreId, Fun, Acc, Options);
@@ -133,24 +164,43 @@ fold(#db{reader_fd=Fd, stores=Stores}, StoreId, Fun, Acc, Options) ->
             cowdb_btree:fold(Store#btree{fd=Fd}, Fun, Acc, Options)
     end.
 
+
+%% @doc add an object to the database
 add({Ref, StoreId}, Value) ->
     add(Ref, StoreId, Value).
 
 add(Ref, StoreId, Value) ->
     transact(Ref, [{add, StoreId, Value}]).
 
+%% @doc remove an object from the database
 remove({Ref, StoreId}, Key) ->
     remove(Ref, StoreId, Key).
 
 remove(Ref, StoreId, Key) ->
     transact(Ref, [{remove, StoreId, Key}]).
 
+
+%% @doc add and remove multiple objects at once from the database
 add_remove({Ref, StoreId}, ToAdd, ToRemove) ->
     add_remove(Ref, StoreId, ToAdd, ToRemove).
 
 add_remove(Ref, StoreId, ToAdd, ToRemove) ->
     transact(Ref, [{add_remove, StoreId, ToAdd, ToRemove}]).
 
+
+%% @doc execute a transaction
+%% A transaction received operations to execute as a list:
+%% <ul>
+%% <li>`{add, StoreId, Obj}' to add an object</li>
+%% <li>`{remove, StoreId, Key}' to remove a value</li>
+%% <li> `{add_remove, StoreId, ToAdd, ToRemove}' to add and remove multiple keys and value at the same time</li>
+%%<li> `{fn, Func}' a transaction function. A transaction function
+%%reveived the db value like it was at the beginning of the transaction
+%%as an argument. It's possible to pass arguments to it. A transaction
+%%function return a list of operations and can wuery/maniuplate
+%%function. The list of operations returned can also contain a
+%%function.</li>
+%%</ul>
 transact(Ref, Ops) ->
     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
     Tag = erlang:monitor(process, UpdaterPid),
