@@ -47,6 +47,7 @@ open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
                         store_already_defined;
                     State ->
                         Options1 = wrap_reduce_fun(Options),
+                        io:format("options ~p~n", [Options]),
                         {ok, Store} = cowdb_btree:open(State, Fd, Options1),
 
                         %% replace the store with the new value
@@ -86,15 +87,16 @@ delete(#db{stores=Stores}=Db, StoreId) ->
 %% wrap the reduce function so we are able to count elements.
 %% TODO: make it native?
 wrap_reduce_fun(Options) ->
-    ReduceFun = case lists:keyfind(reduce, 1, Options) of
+    case lists:keyfind(reduce, 1, Options) of
         false ->
-            fun (reduce, KVs) ->
+            ReduceFun = fun (reduce, KVs) ->
                     length(KVs);
                 (rereduce, Reds) ->
                     list:sum(Reds)
-            end;
+            end,
+            [{reduce, ReduceFun} | Options];
         {_, ReduceFun0} ->
-            fun(reduce, KVs) ->
+            ReduceFun = fun(reduce, KVs) ->
                     Count = length(KVs),
                     Result = ReduceFun0(reduce, KVs),
                     {Count, Result};
@@ -103,6 +105,6 @@ wrap_reduce_fun(Options) ->
                     UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
                     Result = ReduceFun0(rereduce, UsrReds),
                     {Count, Result}
-            end
-    end,
-    lists:keyreplace(reduce, 1, Options, {reduce, ReduceFun}).
+            end,
+            lists:keyreplace(reduce, 1, Options, {reduce, ReduceFun})
+    end.

@@ -18,7 +18,8 @@
 -export([open/2, open/3, open_link/2, open_link/3]).
 -export([open_store/2, open_store/3,
          delete_store/2,
-         stores/1]).
+         stores/1,
+         count/1, count/2]).
 
 -export([get/2, get/3,
          lookup/2, lookup/3,
@@ -116,6 +117,26 @@ delete_store(Db, StoreId) ->
 stores(Db) ->
     gen_server:call(Db, stores).
 
+%% @doc get the number of objects stored in the database.
+-spec count(store()) -> {ok, integer()} | {error, term()}.
+count({Ref, StoreId}) ->
+    count(Ref, StoreId).
+
+
+%% @doc get the number of objects stored in the database.
+-spec count(db(), storeid()) -> {ok, integer()} | {error, term()}.
+count(DbPid, StoreId) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    count(Db, StoreId);
+count(#db{stores=Stores}, StoreId) ->
+    case lists:keyfind(StoreId, 1, Stores) of
+        false -> unknown_store;
+        {StoreId, Store} ->
+            case cowdb_btree:full_reduce(Store) of
+                {ok, {Count, _}} -> {ok, Count};
+                {ok, Count} -> {ok, Count}
+            end
+    end.
 
 %% @doc get an object from its key
 -spec get(store(), Key::any()) -> {ok, any()} | {error, term()}.
