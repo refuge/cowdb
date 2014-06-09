@@ -27,6 +27,7 @@
 
 
 -include("cowdb.hrl").
+-include_lib("cbt/include/cbt.hrl").
 
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
@@ -48,12 +49,12 @@ get_db(Pid) ->
 
 
 init([DbPid, Fd, FilePath, InitFunc, Options]) ->
-    Header = case cowdb_file:read_header(Fd) of
+    Header = case cbt_file:read_header(Fd) of
         {ok, Header1, _Pos} ->
             Header1;
         no_valid_header ->
             Header1 = #db_header{},
-            {ok, _} = cowdb_file:write_header(Fd, Header1),
+            {ok, _} = cbt_file:write_header(Fd, Header1),
             Header1
     end,
 
@@ -97,15 +98,15 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 terminate(_Reason, #db{fd=Fd, reader_fd=FdReader}) ->
-    cowdb_file:close(Fd),
-    cowdb_file:close(FdReader),
+    cbt_file:close(Fd),
+    cbt_file:close(FdReader),
     ok.
 
 
 init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
     NewVersion = proplists:get_value(db_version, Options, 1),
     DefaultFSyncOptions = [before_header, after_header, on_file_open],
-    FSyncOptions = cowdb_util:get_opt(fsync_options, Options,
+    FSyncOptions = cbt_util:get_opt(fsync_options, Options,
                                       DefaultFSyncOptions),
 
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
@@ -113,18 +114,18 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
     #db_header{db_version=OldVersion,
                root=RootP} = Header,
 
-    {ok, Root} = cowdb_btree:open(RootP, Fd),
+    {ok, Root} = cbt_btree:open(RootP, Fd),
 
     Stores = case RootP of
         nil -> [];
         _ ->
-            {ok, _, Stores1} = cowdb_btree:fold(Root, fun({Id, P}, Acc) ->
+            {ok, _, Stores1} = cbt_btree:fold(Root, fun({Id, P}, Acc) ->
                             {ok, [{Id, P} | Acc]}
                     end, []),
             Stores1
     end,
 
-    {ok, ReaderFd} = cowdb_file:open(FilePath, [read_only]),
+    {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
     Db0 = #db{version =NewVersion,
               db_pid=DbPid,
               updater_pid=self(),
@@ -171,7 +172,7 @@ run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
     %% add a value
     case get_store(StoreId, Db) of
         {ok, Store} ->
-            {ok, Store2} = cowdb_btree:add(Store, [Value]),
+            {ok, Store2} = cbt_btree:add(Store, [Value]),
             Db2 = set_store(StoreId, Store2, Db),
             run_transaction(Rest, Db2, DbSnapshot);
         false ->
@@ -181,7 +182,7 @@ run_transaction([{remove, StoreId, Key} | Rest],  Db, DbSnapshot) ->
     %% remove a key
     case get_store(StoreId, Db) of
         {ok, Store} ->
-            {ok, Store2} = cowdb_btree:add_remove(Store, [], [Key]),
+            {ok, Store2} = cbt_btree:add_remove(Store, [], [Key]),
             Db2 = set_store(StoreId, Store2, Db),
             run_transaction(Rest, Db2, DbSnapshot);
         false ->
@@ -192,7 +193,7 @@ run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db,
     %% add a list of keys and remove them at the same time.
     case get_store(StoreId, Db) of
         {ok, Store} ->
-            {ok, Store2} = cowdb_btree:add_remove(Store, ToAdd, ToRemove),
+            {ok, Store2} = cbt_btree:add_remove(Store, ToAdd, ToRemove),
             Db2 = set_store(StoreId, Store2, Db),
             run_transaction(Rest, Db2, DbSnapshot);
         false ->
@@ -240,11 +241,11 @@ commit_transaction(version_change, #db{root=Root, stores=Stores,
                         _ -> Acc
                     end
             end, [], OldStores),
-    ToAdd = [{K, cowdb_btree:get_state(Btree)} || {K, Btree} <- Stores],
-    {ok, Root2} = cowdb_btree:add_remove(Root, ToAdd, ToRemove),
+    ToAdd = [{K, cbt_btree:get_state(Btree)} || {K, Btree} <- Stores],
+    {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, ToRemove),
 
     %% commit the transactions
-    NewHeader = OldHeader#db_header{root=cowdb_btree:get_state(Root2)},
+    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2)},
     ok = write_header(NewHeader, Db),
 
     %% return the new db
@@ -254,12 +255,12 @@ commit_transaction(_,  #db{root=Root, stores=Stores,
                            header=OldHeader}=Db) ->
 
     %% look at updated root to only store their changes
-    ToAdd0 = [{K, cowdb_btree:get_state(Btree)} || {K, Btree} <- Stores],
+    ToAdd0 = [{K, cbt_btree:get_state(Btree)} || {K, Btree} <- Stores],
     ToAdd = ToAdd0 -- OldStores,
     %% store the new root
-    {ok, Root2} = cowdb_btree:add_remove(Root, ToAdd, []),
+    {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, []),
     %% write the header
-    NewHeader = OldHeader#db_header{root=cowdb_btree:get_state(Root2)},
+    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2)},
     ok = write_header(NewHeader, Db),
     {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd0}}.
 
@@ -287,14 +288,14 @@ set_store(StoreId, Store,  #db{stores=Stores}=Db) ->
 
 write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
     ok = maybe_sync(before_header, Fd, FsyncOptions),
-    {ok, _} = cowdb_file:write_header(Fd, Header),
+    {ok, _} = cbt_file:write_header(Fd, Header),
     ok = maybe_sync(after_headerr, Fd, FsyncOptions),
     ok.
 
 maybe_sync(Status, Fd, FSyncOptions) ->
     case lists:member(Status, FSyncOptions) of
         true ->
-            ok = cowdb_file:sync(Fd),
+            ok = cbt_file:sync(Fd),
             ok;
         _ ->
             ok

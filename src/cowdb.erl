@@ -35,6 +35,7 @@
 
 
 -include("cowdb.hrl").
+-include_lib("cbt/include/cbt.hrl").
 
 -type db() :: #db{} | pid().
 -export_type([db/0]).
@@ -58,7 +59,7 @@ open(FilePath, InitFunc) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(FilePath, InitFunc, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
     gen_server:start(?MODULE, [FilePath, InitFunc, Options], SpawnOpts).
 
 
@@ -79,7 +80,7 @@ open_link(FilePath, InitFunc) ->
     | {error, term()}.
 
 open_link(FilePath, InitFunc, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
     gen_server:start_link(?MODULE, [FilePath, InitFunc, Options], SpawnOpts).
 
 
@@ -132,7 +133,7 @@ count(#db{stores=Stores}, StoreId) ->
     case lists:keyfind(StoreId, 1, Stores) of
         false -> unknown_store;
         {StoreId, Store} ->
-            case cowdb_btree:full_reduce(Store) of
+            case cbt_btree:full_reduce(Store) of
                 {ok, {Count, _}} -> {ok, Count};
                 {ok, Count} -> {ok, Count}
             end
@@ -159,7 +160,7 @@ lookup(#db{reader_fd=Fd, stores=Stores}, StoreId, Keys) ->
     case lists:keyfind(StoreId, 1, Stores) of
         false -> unknown_store;
         {StoreId, Store} ->
-            cowdb_btree:lookup(Store#btree{fd=Fd}, Keys)
+            cbt_btree:lookup(Store#btree{fd=Fd}, Keys)
     end.
 
 %% @doc fold all objects form the dabase
@@ -182,7 +183,7 @@ fold(#db{reader_fd=Fd, stores=Stores}, StoreId, Fun, Acc, Options) ->
     case lists:keyfind(StoreId, 1, Stores) of
         false -> unknown_store;
         {StoreId, Store} ->
-            cowdb_btree:fold(Store#btree{fd=Fd}, Fun, Acc, Options)
+            cbt_btree:fold(Store#btree{fd=Fd}, Fun, Acc, Options)
     end.
 
 
@@ -252,7 +253,7 @@ init([FilePath, InitFunc, Options]) ->
         false -> [create_if_missing]
     end,
 
-    case cowdb_file:open(FilePath, OpenOptions) of
+    case cbt_file:open(FilePath, OpenOptions) of
         {ok, Fd} ->
             {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd,
                                                         FilePath, InitFunc,

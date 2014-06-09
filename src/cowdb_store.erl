@@ -16,6 +16,8 @@
 -export([delete/2]).
 
 -include("cowdb.hrl").
+-include_lib("cbt/include/cbt.hrl").
+
 
 -type store_options() :: [{key_path, term() | [term()]} |
                           {compress, function()} |
@@ -48,7 +50,7 @@ open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
                     State ->
                         Options1 = wrap_reduce_fun(Options),
                         io:format("options ~p~n", [Options]),
-                        {ok, Store} = cowdb_btree:open(State, Fd, Options1),
+                        {ok, Store} = cbt_btree:open(State, Fd, Options1),
 
                         %% replace the store with the new value
                         NStores = case Stores of
