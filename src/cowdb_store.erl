@@ -49,7 +49,6 @@ open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
                         store_already_defined;
                     State ->
                         Options1 = wrap_reduce_fun(Options),
-                        io:format("options ~p~n", [Options]),
                         {ok, Store} = cbt_btree:open(State, Fd, Options1),
 
                         %% replace the store with the new value
