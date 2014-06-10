@@ -93,7 +93,7 @@ wrap_reduce_fun(Options) ->
             ReduceFun = fun (reduce, KVs) ->
                     length(KVs);
                 (rereduce, Reds) ->
-                    list:sum(Reds)
+                    lists:sum(Reds)
             end,
             [{reduce, ReduceFun} | Options];
         {_, ReduceFun0} ->
