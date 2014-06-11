@@ -19,9 +19,12 @@
 -include_lib("cbt/include/cbt.hrl").
 
 
--type store_options() :: [{key_path, term() | [term()]} |
-                          {compress, function()} |
-                          {less, function()}].
+-type store_options() :: [{split, fun()} |
+                          {join, fun()} |
+                          {reduce, fun()} |
+                          {compress, fun()} |
+                          {less, fun()} |
+                          {chunk_threshold, integer()}].
 -export_type([store_options/0]).
 
 

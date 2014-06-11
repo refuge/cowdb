@@ -103,6 +103,21 @@ close(DbPid) ->
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
+%% %% Options:
+%% <ul>
+%% <li> `{split, fun(Btree, Value)}' : Take a value and extract content if
+%% needed from it. It returns a {key, Value} tuple. You don't need to
+%% set such function if you already give a {Key, Value} tuple to your
+%% add/add_remove functions.</li>
+%% <li>`{join, fun(Key, Value)'} : The fonction takes the key and value and
+%% return a new Value ussed when you lookup. By default it return a
+%% {Key, Value} .</li>
+%% <li>`{reduce_fun, ReduceFun'} : pass the reduce fun</li>
+%% <li>`{compression, nonde | snappy}': the compression methods used to
+%% compress the data</li>
+%% <li>`{less, LessFun(KeyA, KeyB)}': function used to order the btree that
+%% compare two keys</li>
+%% </ul>
 -spec open_store(db(), storeid()) ->
     {ok, store(), db()}
     | store_already_defined
@@ -113,6 +128,8 @@ open_store(Db, StoreId) ->
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
+%%
+%% Store options:
 -spec open_store(db(), storeid(), cowdb_store:store_options()) ->
     {ok, store(), db()}
     | store_already_defined
@@ -191,7 +208,7 @@ fold({Ref, StoreId}, Fun, Acc, Options) ->
 
 
 
-%% @doc fold all objects form the dabase with range options
+%% @doc fold all objects form the database with range options
 fold(DbPid, StoreId, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     fold(Db, StoreId, Fun, Acc, Options);
@@ -224,6 +241,8 @@ add_remove({Ref, StoreId}, ToAdd, ToRemove) ->
 
 add_remove(Ref, StoreId, ToAdd, ToRemove) ->
     transact(Ref, [{add_remove, StoreId, ToAdd, ToRemove}]).
+
+
 
 
 %% @doc execute a transaction
