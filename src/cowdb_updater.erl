@@ -211,51 +211,26 @@ run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db,
     run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
 run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
     %% add a value
-    case get_store(StoreId, Db) of
-        {ok, Store} ->
-            {ok, Store2} = cbt_btree:add(Store, [Value]),
-            Db2 = set_store(StoreId, Store2, Db),
-            run_transaction(Rest, Db2, DbSnapshot);
-        false ->
-            {error, {unknown_store, StoreId}}
-    end;
+    {ok, _, Db2} = query_modify(StoreId, Db, [], [Value], []),
+    run_transaction(Rest, Db2, DbSnapshot);
 run_transaction([{remove, StoreId, Key} | Rest],  Db, DbSnapshot) ->
     %% remove a key
-    case get_store(StoreId, Db) of
-        {ok, Store} ->
-            {ok, Store2} = cbt_btree:add_remove(Store, [], [Key]),
-            Db2 = set_store(StoreId, Store2, Db),
-            run_transaction(Rest, Db2, DbSnapshot);
-        false ->
-            {error, {unknown_store, StoreId}}
-    end;
+    {ok, _, Db2} = query_modify(StoreId, Db, [], [], [Key]),
+    run_transaction(Rest, Db2, DbSnapshot);
 run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db,
                 DbSnapshot) ->
-    %% add a list of keys and remove them at the same time.
-    case get_store(StoreId, Db) of
-        {ok, Store} ->
-            {ok, Store2} = cbt_btree:add_remove(Store, ToAdd, ToRemove),
-            Db2 = set_store(StoreId, Store2, Db),
-            run_transaction(Rest, Db2, DbSnapshot);
-        false ->
-            {error, {unknown_store, StoreId}}
-    end;
+    %% add remove keys
+    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRemove),
+    run_transaction(Rest, Db2, DbSnapshot);
 run_transaction([{fn, Func} | Rest], Db, DbSnapshot) ->
     %% execute a transaction function
-    Ops = case Func of
-        {M, F, A} ->
-            erlang:apply(M, F, [DbSnapshot | A]);
-        {M, F} ->
-            M:F(DbSnapshot);
-        F ->
-            F(DbSnapshot)
-    end,
-
+    Ops = cowdb_util:apply(Func, [DbSnapshot]),
     {ok, Db2} = run_transaction(Ops, Db, DbSnapshot),
     run_transaction(Rest, Db2, DbSnapshot);
 run_transaction(_, _, _) ->
     {error, unknown_op}.
 
+%% execute transactoin
 do_transaction(Fun, Status) ->
     erlang:put(cowdb_trans, Status),
     try
@@ -307,12 +282,20 @@ commit_transaction(_,  #db{root=Root, meta=Meta, stores=Stores,
     {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd0}}.
 
 
-call_init({M, F, A}, InitStatus, Db) ->
-    erlang:apply(M, F, [InitStatus, Db | A]);
-call_init({M, F}, InitStatus, Db) ->
-    M:F(InitStatus, Db);
-call_init(InitFun, InitStatus, Db) ->
-    InitFun(InitStatus, Db).
+call_init(Fun, InitStatus, Db) ->
+    cowdb_util:apply(Fun, [InitStatus, Db]).
+
+query_modify(StoreId, Db, LookupKeys, InsertValues, RemoveKeys) ->
+    case get_store(StoreId, Db) of
+        {ok, Store} ->
+            {ok, KVs, Store2} = cbt_btree:query_modify(Store, LookupKeys,
+                                                       InsertValues,
+                                                       RemoveKeys),
+            Db2 = set_store(StoreId, Store2, Db),
+            {ok, KVs, Db2};
+        false ->
+            {error, {unknown_store, StoreId}}
+    end.
 
 get_store(StoreId, #db{stores=Stores}) ->
     case lists:keyfind(StoreId, 1, Stores) of
