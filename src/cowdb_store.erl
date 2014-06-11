@@ -55,20 +55,9 @@ open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
                         {ok, Store} = cbt_btree:open(State, Fd, Options1),
 
                         %% replace the store with the new value
-                        NStores = case Stores of
-                            [] ->
-                                [{StoreId, Store}];
-                            _ ->
-                                case lists:keyfind(StoreId, 1, Stores) of
-                                    false ->
-                                        [{StoreId, Store} | Stores];
-                                    _ ->
-                                        lists:keyreplace(StoreId, 1, Stores,
-                                                         {StoreId, Store})
-                                end
-                        end,
-
-                        Db2 = Db#db{stores=NStores},
+                        Stores2 = cowdb_util:set_property(StoreId, Store,
+                                                          Stores),
+                        Db2 = Db#db{stores=Stores2},
                         {ok, Db2}
                 end
 
@@ -85,13 +74,8 @@ open(_, _, _) ->
 -spec delete(cowdb:db(), cowdb:storeid()) -> {ok, cowdb:db()}.
 delete(#db{stores=Stores}=Db, StoreId) ->
     ?IF_TRANS(version_change, fun() ->
-                case lists:keyfind(StoreId, 1, Stores) of
-                    false ->
-                        {ok, Db};
-                    _ ->
-                        NStores = lists:keydelete(StoreId, 1, Stores),
-                        {ok, Db#db{stores=NStores}}
-                end
+                Stores2 = cowdb_util:delete_property(StoreId, Stores),
+                {ok, Db#db{stores=Stores2}}
         end).
 
 
