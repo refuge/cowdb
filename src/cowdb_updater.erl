@@ -207,17 +207,17 @@ run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db) ->
 run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db) ->
     Meta2 = cowdb_util:delete_property(Key, Meta),
     run_transaction(Rest, Db#db{meta=Meta2});
-run_transaction([{add, StoreId, Value} | Rest], Db) ->
+run_transaction([{add, StoreId, ToAdd} | Rest], Db) ->
     %% add a value
-    {ok, _, Db2} = query_modify(StoreId, Db, [], [Value], []),
+    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, []),
     run_transaction(Rest, Db2);
-run_transaction([{remove, StoreId, Key} | Rest],  Db) ->
+run_transaction([{remove, StoreId, ToRem} | Rest],  Db) ->
     %% remove a key
-    {ok, _, Db2} = query_modify(StoreId, Db, [], [], [Key]),
+    {ok, _, Db2} = query_modify(StoreId, Db, [], [], ToRem),
     run_transaction(Rest, Db2);
-run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db) ->
+run_transaction([{add_remove, StoreId, ToAdd, ToRem} | Rest], Db) ->
     %% add remove keys
-    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRemove),
+    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRem),
     run_transaction(Rest, Db2);
 run_transaction([{query_modify, StoreId, ToFind, ToAdd, ToRem, Func} | Rest],
                 Db) ->

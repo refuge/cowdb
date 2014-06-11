@@ -31,6 +31,8 @@
          lookup/2, lookup/3,
          fold/3, fold/4, fold/5,
          fold_reduce/5,
+         put/2, put/3,
+         delete/2, delete/3,
          add/2, add/3,
          remove/2, remove/3,
          add_remove/3, add_remove/4,
@@ -279,27 +281,41 @@ fold_reduce(#db{reader_fd=Fd, stores=Stores}, StoreId, ReduceFun0, Acc,
     end.
 
 
-%% @doc add an object to the database
-add({Ref, StoreId}, Value) ->
-    add(Ref, StoreId, Value).
+%% @doc add one object to a store
+put({Db, StoreId}, Obj) ->
+    put(Db, StoreId, Obj).
 
-add(Ref, StoreId, Value) ->
-    transact(Ref, [{add, StoreId, Value}]).
+put(Db, StoreId, Obj) ->
+    add(Db, StoreId, [Obj]).
 
-%% @doc remove an object from the database
-remove({Ref, StoreId}, Key) ->
-    remove(Ref, StoreId, Key).
+%% @delete one object from the store
+delete({Db, StoreId}, Obj) ->
+    delete(Db, StoreId, Obj).
 
-remove(Ref, StoreId, Key) ->
-    transact(Ref, [{remove, StoreId, Key}]).
+delete(Db, StoreId, Obj) ->
+    remove(Db, StoreId, [Obj]).
+
+%% @doc add  multiple objects to the database
+add({Ref, StoreId}, ToAdd) ->
+    add(Ref, StoreId, ToAdd).
+
+add(Ref, StoreId, ToAdd) ->
+    transact(Ref, [{add, StoreId, ToAdd}]).
+
+%% @doc remove multiple objects from the database
+remove({Ref, StoreId}, ToRem) ->
+    remove(Ref, StoreId, ToRem).
+
+remove(Ref, StoreId, ToRem) ->
+    transact(Ref, [{remove, StoreId, ToRem}]).
 
 
 %% @doc add and remove multiple objects at once from the database
-add_remove({Ref, StoreId}, ToAdd, ToRemove) ->
-    add_remove(Ref, StoreId, ToAdd, ToRemove).
+add_remove({Ref, StoreId}, ToAdd, ToRem) ->
+    add_remove(Ref, StoreId, ToAdd, ToRem).
 
-add_remove(Ref, StoreId, ToAdd, ToRemove) ->
-    transact(Ref, [{add_remove, StoreId, ToAdd, ToRemove}]).
+add_remove(Ref, StoreId, ToAdd, ToRem) ->
+    transact(Ref, [{add_remove, StoreId, ToAdd, ToRem}]).
 
 
 
