@@ -219,6 +219,12 @@ run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db) ->
     %% add remove keys
     {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRemove),
     run_transaction(Rest, Db2);
+run_transaction([{query_modify, StoreId, ToFind, ToAdd, ToRem, Func} | Rest],
+                Db) ->
+    {ok, Found, Db2} = query_modify(StoreId, Db, ToFind, ToAdd, ToRem),
+    Ops = cowdb_util:apply(Func, [Db, Found]),
+    {ok, Db2} = run_transaction(Ops, Db),
+    run_transaction(Rest, Db2);
 run_transaction([{fn, Func} | Rest], Db) ->
     %% execute a transaction function
     Ops = cowdb_util:apply(Func, [Db]),
