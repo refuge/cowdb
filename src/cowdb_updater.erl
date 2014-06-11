@@ -12,17 +12,16 @@
 
 
 -module(cowdb_updater).
--behaviour(gen_server).
 
 
 %% PUBLIC API
--export([start_link/5]).
+-export([start_link/6]).
 -export([transaction_type/0]).
+-export([transact/3]).
 -export([get_db/1]).
 
-%% gen server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         code_change/3, terminate/2]).
+%% proc lib export
+-export([init/6]).
 
 
 
@@ -32,9 +31,12 @@
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
 
-start_link(DbPid, Fd, FilePath, InitFunc, Options) ->
-    gen_server:start_link(?MODULE, [DbPid, Fd, FilePath, InitFunc, Options],
-                          []).
+
+
+
+start_link(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
+    proc_lib:start_link(?MODULE, init, [DbPid, Fd, ReaderFd, FilePath,
+                                        InitFunc, Options]).
 
 
 %% @doc get current transaction type
@@ -45,10 +47,14 @@ transaction_type() ->
 %% @doc get latest db state.
 -spec get_db(pid()) -> cowdb:db().
 get_db(Pid) ->
-    gen_server:call(Pid, get_db, infinity).
+    do_call(Pid, get_db, [], infinity).
 
 
-init([DbPid, Fd, FilePath, InitFunc, Options]) ->
+transact(UpdaterPid, Ops, Timeout) ->
+    TransactId = make_ref(),
+    do_call(UpdaterPid, transact, {TransactId, Ops, Timeout}, infinity).
+
+init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     Header = case cbt_file:read_header(Fd) of
         {ok, Header1, _Pos} ->
             Header1;
@@ -58,52 +64,80 @@ init([DbPid, Fd, FilePath, InitFunc, Options]) ->
             Header1
     end,
 
-    Db = init_db(Header, DbPid, Fd, FilePath, InitFunc, Options),
-    {ok, Db}.
-
-handle_call(get_db, _From, State) ->
-    {reply, State, State};
-
-handle_call(_Msg, _From, State) ->
-    {noreply, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info({transact, Ops, Parent, Tag}, #db{db_pid=DbPid}=Db) ->
-    %% execute the transaction
-    Resp = do_transaction(fun() ->
-                    catch run_transaction(Ops, Db, Db)
-            end, update),
-
-    %% return the result
-    Db2 = case Resp of
-        {ok, Db1} ->
-            %% send to the db the latesr
-            ok = gen_server:call(DbPid, {db_updated, Db1}, infinity),
-
-            Parent ! {Tag, ok},
-            Db1;
+    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc,
+                       Options) of
+        {ok, Db} ->
+            proc_lib:init_ack({ok, self()}),
+            loop(Db);
         Error ->
-            Parent ! {Tag, Error},
-            Db
-    end,
-    {noreply, Db2};
+            error_logger:info_msg("error initialising the database ~p: ~p",
+                                   [FilePath, Error]),
+            proc_lib:init_ack(Error)
+    end.
 
 
-handle_info(_Info, State) ->
-    {noreply, State}.
+loop(#db{db_pid=DbPid, file_path=Path}=Db) ->
+    receive
+        {?MODULE, transact, {Tag, Client}, {TransactId, OPs, Options}} ->
+            {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
+                                                          Options, Db) of
+                {ok, Db1} ->
+                    ok = gen_server:call(DbPid, {db_updated, Db1},
+                                         infinity),
+                    {ok, Db1};
+                Error ->
+                    {Error, Db}
+            end,
 
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
+            Client ! {Tag, Reply},
+            loop(Db2);
+        {?MODULE, get_db, {Tag, Client}, []} ->
+            Client ! {Tag, {ok, Db}},
+            loop(Db);
+        Msg ->
+            error_logger:error_msg(
+                "cow updater of ~p received unexpected message ~p~n",
+                [Path, Msg])
+    end.
 
-terminate(_Reason, #db{fd=Fd, reader_fd=FdReader}) ->
-    cbt_file:close(Fd),
-    cbt_file:close(FdReader),
+
+handle_transaction(TransactId, OPs, Timeout, Db) ->
+    UpdaterPid = self(),
+
+    %% spawn a transaction so we can cancel it if needed.
+    TransactPid = spawn(fun() ->
+                    %% execute the transaction
+                    Resp = do_transaction(fun() ->
+                                    run_transaction(OPs, Db, Db)
+                            end, update),
+
+                    UpdaterPid ! {TransactId, {done, Resp}}
+            end),
+
+    %% wait for its resilut
+    receive
+        {TransactId, {done, Resp}} ->
+            Resp;
+        {TransactId, cancel} ->
+            cbt_util:shutdown_sync(TransactPid),
+            rollback_transaction(Db),
+            {error, canceled}
+    after Timeout ->
+            rollback_transaction(Db),
+            {error, timeout}
+    end.
+
+%% roll back t the latest root
+%% we don't try to edit in place instead we take the
+%% latest known header and append it to the database file
+rollback_transaction(#db{fd=Fd, header=Header}) ->
+    ok= cbt_file:sync(Fd),
+    {ok, _Pos} = cbt_file:write_header(Fd, Header),
+    ok= cbt_file:sync(Fd),
     ok.
 
 
-init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
+init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     NewVersion = proplists:get_value(db_version, Options, 1),
     DefaultFSyncOptions = [before_header, after_header, on_file_open],
     FSyncOptions = cbt_util:get_opt(fsync_options, Options,
@@ -125,7 +159,6 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
             Stores1
     end,
 
-    {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
     Db0 = #db{version =NewVersion,
               db_pid=DbPid,
               updater_pid=self(),
@@ -151,7 +184,7 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
 
 
     %% initialise the database with the init function.
-    {ok, Db} = do_transaction(fun() ->
+    do_transaction(fun() ->
                     case call_init(InitFunc, InitStatus, Db0) of
                         {ok, Db2} ->
                             {ok, Db2};
@@ -162,8 +195,7 @@ init_db(Header, DbPid, Fd, FilePath, InitFunc, Options) ->
                         Error ->
                             Error
                     end
-            end, version_change),
-    Db.
+            end, version_change).
 
 
 run_transaction([], Db, _DbSnapshot) ->
@@ -214,7 +246,6 @@ run_transaction([{fn, Func} | Rest], Db, DbSnapshot) ->
     run_transaction(Rest, Db2, DbSnapshot);
 run_transaction(_, _, _) ->
     {error, unknown_op}.
-
 
 do_transaction(Fun, Status) ->
     erlang:put(cowdb_trans, Status),
@@ -299,4 +330,23 @@ maybe_sync(Status, Fd, FSyncOptions) ->
             ok;
         _ ->
             ok
+    end.
+
+
+
+do_call(UpdaterPid, Label, Request, Timeout) ->
+    Tag = erlang:monitor(process, UpdaterPid),
+    catch erlang:send(UpdaterPid, {?MODULE, Label, {Tag, self()}, Request},
+                      [noconnect]),
+    receive
+        {Tag, Reply} ->
+            erlang:demonitor(Tag, [flush]),
+            Reply;
+        {'DOWN', Tag, _, _, noconnection} ->
+			exit({nodedown, node(UpdaterPid)});
+		{'DOWN', Tag, _, _, Reason} ->
+			exit(Reason)
+    after Timeout ->
+            erlang:demonitor(Tag, [flush]),
+            exit(timeout)
     end.

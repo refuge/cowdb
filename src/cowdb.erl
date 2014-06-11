@@ -16,6 +16,9 @@
 
 
 -export([open/2, open/3, open_link/2, open_link/3]).
+-export([close/1]).
+
+
 -export([open_store/2, open_store/3,
          delete_store/2,
          stores/1,
@@ -27,7 +30,7 @@
          add/2, add/3,
          remove/2, remove/3,
          add_remove/3, add_remove/4,
-         transact/2]).
+         transact/2, transact/3]).
 
 %% gen server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -84,9 +87,37 @@ open_link(FilePath, InitFunc, Options) ->
     gen_server:start_link(?MODULE, [FilePath, InitFunc, Options], SpawnOpts).
 
 
+%% @doc Close the file.
+-spec close(DbPid::pid()) -> ok.
+close(DbPid) ->
+    try
+        gen_server:call(DbPid, close, infinity)
+    catch
+        exit:{noproc,_} -> ok;
+        exit:noproc -> ok;
+        %% Handle the case where the monitor triggers
+        exit:{normal, _} -> ok
+    end.
+
+
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
+%% %% Options:
+%% <ul>
+%% <li> `{split, fun(Btree, Value)}' : Take a value and extract content if
+%% needed from it. It returns a {key, Value} tuple. You don't need to
+%% set such function if you already give a {Key, Value} tuple to your
+%% add/add_remove functions.</li>
+%% <li>`{join, fun(Key, Value)'} : The fonction takes the key and value and
+%% return a new Value ussed when you lookup. By default it return a
+%% {Key, Value} .</li>
+%% <li>`{reduce_fun, ReduceFun'} : pass the reduce fun</li>
+%% <li>`{compression, nonde | snappy}': the compression methods used to
+%% compress the data</li>
+%% <li>`{less, LessFun(KeyA, KeyB)}': function used to order the btree that
+%% compare two keys</li>
+%% </ul>
 -spec open_store(db(), storeid()) ->
     {ok, store(), db()}
     | store_already_defined
@@ -97,6 +128,8 @@ open_store(Db, StoreId) ->
 %% @doc initialise a store, it can only happen in a version_change
 %% transactions and be used in `init/1' or `upgrade/2' functions of the
 %% database module.
+%%
+%% Store options:
 -spec open_store(db(), storeid(), cowdb_store:store_options()) ->
     {ok, store(), db()}
     | store_already_defined
@@ -175,7 +208,7 @@ fold({Ref, StoreId}, Fun, Acc, Options) ->
 
 
 
-%% @doc fold all objects form the dabase with range options
+%% @doc fold all objects form the database with range options
 fold(DbPid, StoreId, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     fold(Db, StoreId, Fun, Acc, Options);
@@ -210,6 +243,8 @@ add_remove(Ref, StoreId, ToAdd, ToRemove) ->
     transact(Ref, [{add_remove, StoreId, ToAdd, ToRemove}]).
 
 
+
+
 %% @doc execute a transaction
 %% A transaction received operations to execute as a list:
 %% <ul>
@@ -223,23 +258,13 @@ add_remove(Ref, StoreId, ToAdd, ToRemove) ->
 %%function. The list of operations returned can also contain a
 %%function.</li>
 %%</ul>
-transact(Ref, Ops) ->
-    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
-    Tag = erlang:monitor(process, UpdaterPid),
-    try
-        UpdaterPid ! {transact, Ops, self(), Tag},
-        receive
-            {Tag, Resp} ->
-                Resp;
-            {'DOWN', Tag, _, _, Reason} ->
-                error_logger:error_msg("updater pid exited with reason ~p~n",
-                                       [Reason]),
-                {error, Reason}
-        end
-    after
-        erlang:demonitor(Tag, [flush])
-    end.
+%%
+transact(Ref, OPs) ->
+    transact(Ref, OPs, infinity).
 
+transact(Ref, OPs, Timeout) ->
+    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
+    cowdb_updater:transact(UpdaterPid, OPs, Timeout).
 
 %% --------------------
 %% gen_server callbacks
@@ -255,10 +280,14 @@ init([FilePath, InitFunc, Options]) ->
 
     case cbt_file:open(FilePath, OpenOptions) of
         {ok, Fd} ->
-            {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd,
+            %% open the the reader file
+            {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
+
+            %% initialise the db updater process
+            {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd, ReaderFd,
                                                         FilePath, InitFunc,
                                                         Options),
-            Db = cowdb_updater:get_db(UpdaterPid),
+            {ok, Db} = cowdb_updater:get_db(UpdaterPid),
             process_flag(trap_exit, true),
             {ok, Db};
         Error ->
@@ -287,6 +316,8 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+handle_info({'EXIT', _, Reason}, Db) ->
+    {stop, Reason, Db};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -295,5 +326,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% @private
-terminate(_Reason, _State) ->
+terminate(_Reason, #db{updater_pid=UpdaterPid, fd=Fd, reader_fd=ReaderFd}) ->
+    %% close the updater pid
+    ok = cbt_util:shutdown_sync(UpdaterPid),
+    %% close file descriptors
+    ok = cbt_file:close(Fd),
+    ok = cbt_file:close(ReaderFd),
     ok.
