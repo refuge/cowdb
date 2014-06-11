@@ -203,17 +203,11 @@ run_transaction([], Db, _DbSnapshot) ->
     {ok, Db};
 run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db,
                 DbSnapshot) ->
-    Meta2 = case lists:keyfind(Key, 1, Meta) of
-        false -> [{Key, Value} | Meta];
-        _ -> lists:keyreplace(Key, 1, Meta, {Key, Value})
-    end,
+    Meta2 = cowdb_util:set_property(Key, Value, Meta),
     run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
 run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db,
                 DbSnapshot) ->
-    Meta2 = case lists:keyfind(Key, 1, Meta) of
-        false -> Meta;
-        _ -> lists:keydelete(Key, 1, Meta)
-    end,
+    Meta2 = cowdb_util:delete_property(Key, Meta),
     run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
 run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
     %% add a value
