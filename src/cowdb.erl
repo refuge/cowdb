@@ -17,6 +17,9 @@
 
 -export([open/2, open/3, open_link/2, open_link/3]).
 -export([close/1]).
+-export([set_metadata/3,
+         get_metadata/1, get_metadata/2, get_metadata/3,
+         delete_metadata/2]).
 
 
 -export([open_store/2, open_store/3,
@@ -99,6 +102,32 @@ close(DbPid) ->
         %% Handle the case where the monitor triggers
         exit:{normal, _} -> ok
     end.
+
+
+set_metadata(Ref, Key, Value) ->
+    transact(Ref, [{set_meta, Key, Value}]).
+
+
+
+get_metadata(DbPid) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    get_metadata(Db);
+get_metadata(#db{meta=Meta}) ->
+    Meta.
+
+get_metadata(Db, Key) ->
+    get_metadata(Db, Key, undefined).
+
+get_metadata(DbPid, Key, Default) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    get_metadata(Db, Key, Default);
+get_metadata(#db{meta=Meta}, Key, Default) ->
+    proplists:get_value(Key, Meta, Default).
+
+delete_metadata(DbPid, Key) ->
+    transact(DbPid, [{delete_meta, Key}]).
+
+
 
 
 %% @doc initialise a store, it can only happen in a version_change

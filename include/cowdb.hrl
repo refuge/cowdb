@@ -15,7 +15,8 @@
 
 -record(db_header, {version=?DISK_VERSION,
                     db_version=1,
-                    root=nil}).
+                    root=nil,
+                    meta=[]}).
 
 -record(db, {version,
              db_pid,
@@ -23,7 +24,8 @@
              fd,
              reader_fd,
              root=nil,
-             stores= [],
+             meta=[],
+             stores=[],
              old_stores=[],
              db_mod,
              header,

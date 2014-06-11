@@ -146,7 +146,8 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
 
     #db_header{db_version=OldVersion,
-               root=RootP} = Header,
+               root=RootP,
+               meta=Meta} = Header,
 
     {ok, Root} = cbt_btree:open(RootP, Fd),
 
@@ -165,6 +166,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
               fd=Fd,
               reader_fd=ReaderFd,
               root=Root,
+              meta=Meta,
               stores=lists:reverse(Stores),
               header=Header,
               file_path=FilePath,
@@ -199,6 +201,20 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
 
 run_transaction([], Db, _DbSnapshot) ->
     {ok, Db};
+run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db,
+                DbSnapshot) ->
+    Meta2 = case lists:keyfind(Key, 1, Meta) of
+        false -> [{Key, Value} | Meta];
+        _ -> lists:keyreplace(Key, 1, Meta, {Key, Value})
+    end,
+    run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
+run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db,
+                DbSnapshot) ->
+    Meta2 = case lists:keyfind(Key, 1, Meta) of
+        false -> Meta;
+        _ -> lists:keydelete(Key, 1, Meta)
+    end,
+    run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
 run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
     %% add a value
     case get_store(StoreId, Db) of
@@ -260,7 +276,7 @@ do_transaction(Fun, Status) ->
     end.
 
 %% TODO: improve the transacton commit to make it faster.
-commit_transaction(version_change, #db{root=Root, stores=Stores,
+commit_transaction(version_change, #db{root=Root, meta=Meta, stores=Stores,
                                        old_stores=OldStores,
                                        header=OldHeader}=Db) ->
 
@@ -275,12 +291,13 @@ commit_transaction(version_change, #db{root=Root, stores=Stores,
     {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, ToRemove),
 
     %% commit the transactions
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2)},
+    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
+                                    meta=Meta},
     ok = write_header(NewHeader, Db),
 
     %% return the new db
-    {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd}};
-commit_transaction(_,  #db{root=Root, stores=Stores,
+    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd}};
+commit_transaction(_,  #db{root=Root, meta=Meta, stores=Stores,
                            old_stores = OldStores,
                            header=OldHeader}=Db) ->
 
@@ -290,9 +307,10 @@ commit_transaction(_,  #db{root=Root, stores=Stores,
     %% store the new root
     {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, []),
     %% write the header
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2)},
+    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
+                                    meta=Meta},
     ok = write_header(NewHeader, Db),
-    {ok, Db#db{root=Root2, header=NewHeader, old_stores=ToAdd0}}.
+    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd0}}.
 
 
 call_init({M, F, A}, InitStatus, Db) ->
