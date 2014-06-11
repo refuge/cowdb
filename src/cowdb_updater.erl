@@ -197,7 +197,6 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
                     end
             end, version_change).
 
-
 run_transaction([], Db, _DbSnapshot) ->
     {ok, Db};
 run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
@@ -302,7 +301,6 @@ call_init({M, F}, InitStatus, Db) ->
     M:F(InitStatus, Db);
 call_init(InitFun, InitStatus, Db) ->
     InitFun(InitStatus, Db).
-
 
 get_store(StoreId, #db{stores=Stores}) ->
     case lists:keyfind(StoreId, 1, Stores) of

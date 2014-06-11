@@ -27,6 +27,7 @@
 -export([get/2, get/3,
          lookup/2, lookup/3,
          fold/3, fold/4, fold/5,
+         fold_reduce/5,
          add/2, add/3,
          remove/2, remove/3,
          add_remove/3, add_remove/4,
@@ -217,6 +218,35 @@ fold(#db{reader_fd=Fd, stores=Stores}, StoreId, Fun, Acc, Options) ->
         false -> unknown_store;
         {StoreId, Store} ->
             cbt_btree:fold(Store#btree{fd=Fd}, Fun, Acc, Options)
+    end.
+
+
+%% @doc fold the reduce function over the results.
+fold_reduce(DbPid, StoreId, ReduceFun, Acc, Options) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    fold_reduce(Db, StoreId,  ReduceFun, Acc, Options);
+fold_reduce(#db{reader_fd=Fd, stores=Stores}, StoreId, ReduceFun0, Acc,
+            Options) ->
+    case lists:keyfind(StoreId, 1, Stores) of
+        false ->
+            unknown_store;
+        {StoreId, Store} ->
+            ReduceFun = fun(reduce, KVs) ->
+                    Result = ReduceFun0(reduce, KVs),
+                    {0, Result};
+                (rereduce, Reds) ->
+                    UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
+                    Result = ReduceFun0(rereduce, UsrReds),
+                    {0, Result}
+            end,
+
+            WrapperFun = fun({GroupedKey, _}, PartialReds, Acc0) ->
+                    {_, Reds} = couch_btree:final_reduce(ReduceFun,
+                                                         PartialReds),
+                    ReduceFun(GroupedKey, Reds, Acc0)
+            end,
+            couch_btree:fold_reduce(Store#btree{fd=Fd}, WrapperFun, Acc,
+                                    Options)
     end.
 
 
