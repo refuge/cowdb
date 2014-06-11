@@ -56,9 +56,16 @@ open(#db{fd=Fd, stores=Stores}=Db, StoreId, Options) ->
 
                         %% replace the store with the new value
                         NStores = case Stores of
-                            [] -> [{StoreId, Store}];
-                            _ -> lists:keyreplace(StoreId, 1, Stores,
-                                                  {StoreId, Store})
+                            [] ->
+                                [{StoreId, Store}];
+                            _ ->
+                                case lists:keyfind(StoreId, 1, Stores) of
+                                    false ->
+                                        [{StoreId, Store} | Stores];
+                                    _ ->
+                                        lists:keyreplace(StoreId, 1, Stores,
+                                                         {StoreId, Store})
+                                end
                         end,
 
                         Db2 = Db#db{stores=NStores},
