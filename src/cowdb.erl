@@ -16,6 +16,9 @@
 
 
 -export([open/2, open/3, open_link/2, open_link/3]).
+-export([close/1]).
+
+
 -export([open_store/2, open_store/3,
          delete_store/2,
          stores/1,
@@ -27,7 +30,7 @@
          add/2, add/3,
          remove/2, remove/3,
          add_remove/3, add_remove/4,
-         transact/2]).
+         transact/2, transact/3]).
 
 %% gen server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -82,6 +85,19 @@ open_link(FilePath, InitFunc) ->
 open_link(FilePath, InitFunc, Options) ->
     SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
     gen_server:start_link(?MODULE, [FilePath, InitFunc, Options], SpawnOpts).
+
+
+%% @doc Close the file.
+-spec close(DbPid::pid()) -> ok.
+close(DbPid) ->
+    try
+        gen_server:call(DbPid, close, infinity)
+    catch
+        exit:{noproc,_} -> ok;
+        exit:noproc -> ok;
+        %% Handle the case where the monitor triggers
+        exit:{normal, _} -> ok
+    end.
 
 
 %% @doc initialise a store, it can only happen in a version_change
@@ -223,23 +239,13 @@ add_remove(Ref, StoreId, ToAdd, ToRemove) ->
 %%function. The list of operations returned can also contain a
 %%function.</li>
 %%</ul>
-transact(Ref, Ops) ->
-    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
-    Tag = erlang:monitor(process, UpdaterPid),
-    try
-        UpdaterPid ! {transact, Ops, self(), Tag},
-        receive
-            {Tag, Resp} ->
-                Resp;
-            {'DOWN', Tag, _, _, Reason} ->
-                error_logger:error_msg("updater pid exited with reason ~p~n",
-                                       [Reason]),
-                {error, Reason}
-        end
-    after
-        erlang:demonitor(Tag, [flush])
-    end.
+%%
+transact(Ref, OPs) ->
+    transact(Ref, OPs, infinity).
 
+transact(Ref, OPs, Timeout) ->
+    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
+    cowdb_updater:transact(UpdaterPid, OPs, Timeout).
 
 %% --------------------
 %% gen_server callbacks
@@ -255,10 +261,14 @@ init([FilePath, InitFunc, Options]) ->
 
     case cbt_file:open(FilePath, OpenOptions) of
         {ok, Fd} ->
-            {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd,
+            %% open the the reader file
+            {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
+
+            %% initialise the db updater process
+            {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd, ReaderFd,
                                                         FilePath, InitFunc,
                                                         Options),
-            Db = cowdb_updater:get_db(UpdaterPid),
+            {ok, Db} = cowdb_updater:get_db(UpdaterPid),
             process_flag(trap_exit, true),
             {ok, Db};
         Error ->
@@ -287,6 +297,8 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+handle_info({'EXIT', _, Reason}, Db) ->
+    {stop, Reason, Db};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -295,5 +307,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% @private
-terminate(_Reason, _State) ->
+terminate(_Reason, #db{updater_pid=UpdaterPid, fd=Fd, reader_fd=ReaderFd}) ->
+    %% close the updater pid
+    ok = cbt_util:shutdown_sync(UpdaterPid),
+    %% close file descriptors
+    ok = cbt_file:close(Fd),
+    ok = cbt_file:close(ReaderFd),
     ok.
