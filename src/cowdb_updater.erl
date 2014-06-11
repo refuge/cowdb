@@ -108,7 +108,7 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
     TransactPid = spawn(fun() ->
                     %% execute the transaction
                     Resp = do_transaction(fun() ->
-                                    run_transaction(OPs, Db, Db)
+                                    run_transaction(OPs, Db)
                             end, update),
 
                     UpdaterPid ! {TransactId, {done, Resp}}
@@ -193,41 +193,38 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
                         {ok, Db2, Ops} ->
                             %% an init function can return an initial
                             %% transaction.
-                            run_transaction(Ops, Db2, Db2);
+                            run_transaction(Ops, Db2);
                         Error ->
                             Error
                     end
             end, version_change).
 
-run_transaction([], Db, _DbSnapshot) ->
+run_transaction([], Db) ->
     {ok, Db};
-run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db,
-                DbSnapshot) ->
+run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db) ->
     Meta2 = cowdb_util:set_property(Key, Value, Meta),
-    run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
-run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db,
-                DbSnapshot) ->
+    run_transaction(Rest, Db#db{meta=Meta2});
+run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db) ->
     Meta2 = cowdb_util:delete_property(Key, Meta),
-    run_transaction(Rest, Db#db{meta=Meta2}, DbSnapshot);
-run_transaction([{add, StoreId, Value} | Rest], Db, DbSnapshot) ->
+    run_transaction(Rest, Db#db{meta=Meta2});
+run_transaction([{add, StoreId, Value} | Rest], Db) ->
     %% add a value
     {ok, _, Db2} = query_modify(StoreId, Db, [], [Value], []),
-    run_transaction(Rest, Db2, DbSnapshot);
-run_transaction([{remove, StoreId, Key} | Rest],  Db, DbSnapshot) ->
+    run_transaction(Rest, Db2);
+run_transaction([{remove, StoreId, Key} | Rest],  Db) ->
     %% remove a key
     {ok, _, Db2} = query_modify(StoreId, Db, [], [], [Key]),
-    run_transaction(Rest, Db2, DbSnapshot);
-run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db,
-                DbSnapshot) ->
+    run_transaction(Rest, Db2);
+run_transaction([{add_remove, StoreId, ToAdd, ToRemove} | Rest], Db) ->
     %% add remove keys
     {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRemove),
-    run_transaction(Rest, Db2, DbSnapshot);
-run_transaction([{fn, Func} | Rest], Db, DbSnapshot) ->
+    run_transaction(Rest, Db2);
+run_transaction([{fn, Func} | Rest], Db) ->
     %% execute a transaction function
-    Ops = cowdb_util:apply(Func, [DbSnapshot]),
-    {ok, Db2} = run_transaction(Ops, Db, DbSnapshot),
-    run_transaction(Rest, Db2, DbSnapshot);
-run_transaction(_, _, _) ->
+    Ops = cowdb_util:apply(Func, [Db]),
+    {ok, Db2} = run_transaction(Ops, Db),
+    run_transaction(Rest, Db2);
+run_transaction(_, _) ->
     {error, unknown_op}.
 
 %% execute transactoin
