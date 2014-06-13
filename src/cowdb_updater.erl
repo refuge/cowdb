@@ -101,42 +101,6 @@ loop(#db{db_pid=DbPid, file_path=Path}=Db) ->
     end.
 
 
-handle_transaction(TransactId, OPs, Timeout, Db) ->
-    UpdaterPid = self(),
-
-    %% spawn a transaction so we can cancel it if needed.
-    TransactPid = spawn(fun() ->
-                    %% execute the transaction
-                    Resp = do_transaction(fun() ->
-                                    run_transaction(OPs, Db)
-                            end, update),
-
-                    UpdaterPid ! {TransactId, {done, Resp}}
-            end),
-
-    %% wait for its resilut
-    receive
-        {TransactId, {done, Resp}} ->
-            Resp;
-        {TransactId, cancel} ->
-            cbt_util:shutdown_sync(TransactPid),
-            rollback_transaction(Db),
-            {error, canceled}
-    after Timeout ->
-            rollback_transaction(Db),
-            {error, timeout}
-    end.
-
-%% roll back t the latest root
-%% we don't try to edit in place instead we take the
-%% latest known header and append it to the database file
-rollback_transaction(#db{fd=Fd, header=Header}) ->
-    ok= cbt_file:sync(Fd),
-    {ok, _Pos} = cbt_file:write_header(Fd, Header),
-    ok= cbt_file:sync(Fd),
-    ok.
-
-
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     NewVersion = proplists:get_value(db_version, Options, 1),
     DefaultFSyncOptions = [before_header, after_header, on_file_open],
@@ -199,6 +163,44 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
                     end
             end, version_change).
 
+handle_transaction(TransactId, OPs, Timeout, Db) ->
+    UpdaterPid = self(),
+
+    %% spawn a transaction so we can cancel it if needed.
+    TransactPid = spawn(fun() ->
+                    %% execute the transaction
+                    Resp = do_transaction(fun() ->
+                                    run_transaction(OPs, Db)
+                            end, update),
+
+                    UpdaterPid ! {TransactId, {done, Resp}}
+            end),
+
+    %% wait for its resilut
+    receive
+        {TransactId, {done, cancel}} ->
+            rollback_transaction(Db),
+            {error, canceled};
+        {TransactId, {done, Resp}} ->
+            Resp;
+        {TransactId, cancel} ->
+            cbt_util:shutdown_sync(TransactPid),
+            rollback_transaction(Db),
+            {error, canceled}
+    after Timeout ->
+            rollback_transaction(Db),
+            {error, timeout}
+    end.
+
+%% roll back t the latest root
+%% we don't try to edit in place instead we take the
+%% latest known header and append it to the database file
+rollback_transaction(#db{fd=Fd, header=Header}) ->
+    ok= cbt_file:sync(Fd),
+    {ok, _Pos} = cbt_file:write_header(Fd, Header),
+    ok= cbt_file:sync(Fd),
+    ok.
+
 run_transaction([], Db) ->
     {ok, Db};
 run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db) ->
@@ -223,8 +225,12 @@ run_transaction([{query_modify, StoreId, ToFind, ToAdd, ToRem, Func} | Rest],
                 Db) ->
     {ok, Found, Db2} = query_modify(StoreId, Db, ToFind, ToAdd, ToRem),
     Ops = cowdb_util:apply(Func, [Db, Found]),
-    {ok, Db2} = run_transaction(Ops, Db),
-    run_transaction(Rest, Db2);
+    case run_transaction(Ops, Db) of
+        {ok, Db2} ->
+            run_transaction(Rest, Db2);
+        Else ->
+            Else
+    end;
 run_transaction([{fn, Func} | Rest], Db) ->
     %% execute a transaction function
     Ops = cowdb_util:apply(Func, [Db]),
