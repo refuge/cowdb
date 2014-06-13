@@ -15,10 +15,12 @@
 
 -record(db_header, {version=?DISK_VERSION,
                     db_version=1,
+                    tid=0,
                     root=nil,
                     meta=[]}).
 
 -record(db, {version,
+             tid=0,
              db_pid,
              updater_pid,
              fd,

@@ -10,9 +10,7 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
-
 -module(cowdb_updater).
-
 
 %% PUBLIC API
 -export([start_link/6]).
@@ -24,15 +22,11 @@
 -export([init/6]).
 
 
-
 -include("cowdb.hrl").
 -include_lib("cbt/include/cbt.hrl").
 
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
-
-
-
 
 start_link(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     proc_lib:start_link(?MODULE, init, [DbPid, Fd, ReaderFd, FilePath,
@@ -49,10 +43,10 @@ transaction_type() ->
 get_db(Pid) ->
     do_call(Pid, get_db, [], infinity).
 
-
+%% @doc send a transaction and wait for its result.
 transact(UpdaterPid, Ops, Timeout) ->
-    TransactId = make_ref(),
-    do_call(UpdaterPid, transact, {TransactId, Ops, Timeout}, infinity).
+    do_call(UpdaterPid, transact, {Ops, Timeout}, infinity).
+
 
 init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     Header = case cbt_file:read_header(Fd) of
@@ -76,9 +70,10 @@ init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     end.
 
 
-loop(#db{db_pid=DbPid, file_path=Path}=Db) ->
+loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
     receive
-        {?MODULE, transact, {Tag, Client}, {TransactId, OPs, Options}} ->
+        {?MODULE, transact, {Tag, Client}, {OPs, Options}} ->
+            TransactId = LastTid + 1,
             {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
                                                           Options, Db) of
                 {ok, Db1} ->
@@ -110,6 +105,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
 
     #db_header{db_version=OldVersion,
+               tid=Tid,
                root=RootP,
                meta=Meta} = Header,
 
@@ -124,7 +120,8 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
             Stores1
     end,
 
-    Db0 = #db{version =NewVersion,
+    Db0 = #db{version=NewVersion,
+              tid=Tid,
               db_pid=DbPid,
               updater_pid=self(),
               fd=Fd,
@@ -161,7 +158,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
                         Error ->
                             Error
                     end
-            end, version_change).
+            end, version_change, Tid+1).
 
 handle_transaction(TransactId, OPs, Timeout, Db) ->
     UpdaterPid = self(),
@@ -171,7 +168,7 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
                     %% execute the transaction
                     Resp = do_transaction(fun() ->
                                     run_transaction(OPs, Db)
-                            end, update),
+                            end, update, TransactId),
 
                     UpdaterPid ! {TransactId, {done, Resp}}
             end),
@@ -240,12 +237,12 @@ run_transaction(_, _) ->
     {error, unknown_op}.
 
 %% execute transactoin
-do_transaction(Fun, Status) ->
+do_transaction(Fun, Status, TransactId) ->
     erlang:put(cowdb_trans, Status),
     try
         case catch Fun() of
             {ok, Db} ->
-                commit_transaction(Status, Db);
+                commit_transaction(Status, TransactId, Db);
             Error ->
                 Error
         end
@@ -254,9 +251,9 @@ do_transaction(Fun, Status) ->
     end.
 
 %% TODO: improve the transacton commit to make it faster.
-commit_transaction(version_change, #db{root=Root, meta=Meta, stores=Stores,
-                                       old_stores=OldStores,
-                                       header=OldHeader}=Db) ->
+commit_transaction(version_change, TransactId,
+                   #db{root=Root, meta=Meta, stores=Stores,
+                       old_stores=OldStores, header=OldHeader}=Db) ->
 
     %% update the root tree
     ToRemove = lists:foldl(fun({K, _P}, Acc) ->
@@ -269,26 +266,29 @@ commit_transaction(version_change, #db{root=Root, meta=Meta, stores=Stores,
     {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, ToRemove),
 
     %% commit the transactions
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
+    NewHeader = OldHeader#db_header{tid=TransactId,
+                                    root=cbt_btree:get_state(Root2),
                                     meta=Meta},
     ok = write_header(NewHeader, Db),
 
     %% return the new db
-    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd}};
-commit_transaction(_,  #db{root=Root, meta=Meta, stores=Stores,
-                           old_stores = OldStores,
-                           header=OldHeader}=Db) ->
-
+    {ok, Db#db{tid=TransactId, root=Root2, meta=Meta, header=NewHeader,
+               old_stores=ToAdd}};
+commit_transaction(_,  TransactId,
+                   #db{root=Root, meta=Meta, stores=Stores,
+                       old_stores = OldStores, header=OldHeader}=Db) ->
     %% look at updated root to only store their changes
     ToAdd0 = [{K, cbt_btree:get_state(Btree)} || {K, Btree} <- Stores],
     ToAdd = ToAdd0 -- OldStores,
     %% store the new root
     {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, []),
     %% write the header
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
+    NewHeader = OldHeader#db_header{tid=TransactId,
+                                    root=cbt_btree:get_state(Root2),
                                     meta=Meta},
     ok = write_header(NewHeader, Db),
-    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd0}}.
+    {ok, Db#db{tid=TransactId, root=Root2, meta=Meta, header=NewHeader,
+               old_stores=ToAdd0}}.
 
 
 call_init(Fun, InitStatus, Db) ->
