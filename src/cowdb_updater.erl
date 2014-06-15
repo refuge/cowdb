@@ -14,12 +14,16 @@
 
 %% PUBLIC API
 -export([start_link/5]).
--export([transaction_type/0]).
 -export([transact/3]).
 -export([get_db/1]).
+-export([call/3, call/4]).
+
 
 %% proc lib export
 -export([init/5]).
+
+%% compaction util export
+-export([init_db/6]).
 
 
 -include("cowdb.hrl").
@@ -33,11 +37,6 @@ start_link(DbPid, Fd, ReaderFd, FilePath, Options) ->
                                         Options]).
 
 
-%% @doc get current transaction type
--spec transaction_type() -> trans_type().
-transaction_type() ->
-    erlang:get(cowdb_trans).
-
 %% @doc get latest db state.
 -spec get_db(pid()) -> cowdb:db().
 get_db(Pid) ->
@@ -46,6 +45,13 @@ get_db(Pid) ->
 %% @doc send a transaction and wait for its result.
 transact(UpdaterPid, Ops, Timeout) ->
     do_call(UpdaterPid, transact, {Ops, Timeout}, infinity).
+
+
+call(UpdaterPid, Label, Args) ->
+    call(UpdaterPid, Label, Args, infinity).
+
+call(UpdaterPid, Label, Args, Timeout) ->
+    do_call(UpdaterPid, Label, Args, Timeout).
 
 
 init(DbPid, Fd, ReaderFd, FilePath, Options) ->
@@ -58,7 +64,9 @@ init(DbPid, Fd, ReaderFd, FilePath, Options) ->
             Header1
     end,
 
-    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) of
+
+    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath,
+                          Options) of
         {ok, Db} ->
             proc_lib:init_ack({ok, self()}),
             loop(Db);
@@ -96,74 +104,38 @@ loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
 
 
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
-    DefaultFSyncOptions = [before_header, after_header, on_file_open],
-    FSyncOptions = cbt_util:get_opt(fsync_options, Options,
-                                      DefaultFSyncOptions),
+    Db = cowdb_util:init_db(Header, DbPid, Fd, ReaderFd, FilePath,
+                             Options),
 
-    %% maybe sync the header
-    ok = maybe_sync(on_file_open, Fd, FSyncOptions),
-
-    %% extract infos from the header
-    #db_header{tid=Tid,
-               by_id=IdP,
-               log=LogP} = Header,
-
-
-    %% initialise the btrees
-    Compression = cbt_util:get_opt(compression, Options, ?DEFAULT_COMPRESSION),
-    DefaultLess = fun(A, B) -> A < B end,
-    Less = cbt_util:get_opt(less, Options, DefaultLess),
-    Reduce = by_id_reduce(Options),
-
-    {ok, IdBt} = cbt_btree:open(IdP, Fd, [{compression, Compression},
-                                          {less, Less},
-                                          {reduce, Reduce}]),
-
-    {ok, LogBt} = cbt_btree:open(LogP, Fd, [{compression, Compression},
-                                            {reduce, fun log_reduce/2}]),
-
-    %% initial db record
-    Db0 = #db{tid=Tid,
-              db_pid=DbPid,
-              updater_pid=self(),
-              fd=Fd,
-              reader_fd=ReaderFd,
-              by_id=IdBt,
-              log=LogBt,
-              header=Header,
-              file_path=FilePath,
-              fsync_options=FSyncOptions},
-
+    #db{tid=Tid, log=LogBt} = Db,
 
     ShouldInit = Tid < 0,
     InitFunc = proplists:get_value(init_func, Options),
 
     case {ShouldInit, InitFunc} of
         {true, undefined} ->
-            Transaction = {0, #transaction{tid=0,
-                                           by_id=nil,
+            Transaction = {0, #transaction{by_id=nil,
                                            ops=[],
                                            ts= cowdb_util:timestamp()}},
             {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
-            commit_transaction(0, Db0#db{log=LogBt2});
+            cowdb_util:commit_transaction(0, Db#db{log=LogBt2});
         {false, undefined} ->
-            {ok, Db0};
+            {ok, Db};
         {_, InitFunc} ->
             TransactId = Tid + 1,
             %% initialise the database with the init function.
             do_transaction(fun() ->
-                        case call_init(InitFunc, Tid, TransactId, Db0) of
+                        case call_init(InitFunc, Tid, TransactId, Db) of
                             {ok, Ops} ->
                                 %% an init function can return an initial
                                 %% transaction.
                                 run_transaction(Ops, {[], []}, TransactId,
-                                                Db0);
+                                                Db);
                             Error ->
                                 Error
                         end
                 end, TransactId)
     end.
-
 
 handle_transaction(TransactId, OPs, Timeout, Db) ->
     UpdaterPid = self(),
@@ -204,25 +176,28 @@ rollback_transaction(#db{fd=Fd, header=Header}) ->
     ok= cbt_file:sync(Fd),
     ok.
 
-
 run_transaction([], {ToAdd, ToRem}, TransactId,
                 #db{by_id=IdBt, log=LogBt}=Db) ->
     %% we atomically store the transaction.
     {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
+
+
     %% reconstruct transactions operations for the log
     Ops0 = lists:foldl(fun({_K, V}, Acc) ->
                     [{add, V} | Acc]
             end, [], ToAdd),
-    Ops = lists:reverse(lists:foldl(
-                fun({ok, {_K, {Key, Pointer, _, Ts}}}, Acc) ->
+    Ops = lists:reverse(lists:foldl(fun
+                    ({ok, {_K, {Key, Pointer, _, Ts}}}, Acc) ->
                         V1 = {Key, Pointer, TransactId, Ts},
-                        [{remove, V1} | Acc]
+                        [{remove, V1} | Acc];
+                    ({not_found, _}, Acc) ->
+                        Acc
                 end, Ops0, Found)),
     %% store the new log
     Transaction = {TransactId, #transaction{tid=TransactId,
                                             by_id=cbt_btree:get_state(IdBt2),
                                             ops=Ops,
-                                            ts = cowdb_util:timestamp()}},
+                                            ts=cowdb_util:timestamp()}},
     {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
 run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, TransactId,
@@ -249,7 +224,7 @@ do_transaction(Fun, TransactId) ->
     try
         case catch Fun() of
             {ok, Db} ->
-                commit_transaction(TransactId, Db);
+                cowdb_util:commit_transaction(TransactId, Db);
             Error ->
                 Error
         end
@@ -257,36 +232,8 @@ do_transaction(Fun, TransactId) ->
         erlang:erase(cowdb_trans)
     end.
 
-%% commit the transction on the disk.
-commit_transaction(TransactId, #db{by_id=IdBt,
-                                   log=LogBt,
-                                   header=OldHeader}=Db) ->
-
-    %% write the header
-    NewHeader = OldHeader#db_header{tid=TransactId,
-                                    by_id=cbt_btree:get_state(IdBt),
-                                    log=cbt_btree:get_state(LogBt)},
-    ok = write_header(NewHeader, Db),
-    {ok, Db#db{tid=TransactId, header=NewHeader}}.
-
-
 call_init(Fun, OldTransactId, NewTransactId, Db) ->
     cowdb_util:apply(Fun, [Db, OldTransactId, NewTransactId]).
-
-write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
-    ok = maybe_sync(before_header, Fd, FsyncOptions),
-    {ok, _} = cbt_file:write_header(Fd, Header),
-    ok = maybe_sync(after_headerr, Fd, FsyncOptions),
-    ok.
-
-maybe_sync(Status, Fd, FSyncOptions) ->
-    case lists:member(Status, FSyncOptions) of
-        true ->
-            ok = cbt_file:sync(Fd),
-            ok;
-        _ ->
-            ok
-    end.
 
 do_call(UpdaterPid, Label, Request, Timeout) ->
     Tag = erlang:monitor(process, UpdaterPid),
@@ -304,32 +251,3 @@ do_call(UpdaterPid, Label, Request, Timeout) ->
             erlang:demonitor(Tag, [flush]),
             exit(timeout)
     end.
-
-
-%% TODO: make it native?
-by_id_reduce(Options) ->
-    case lists:keyfind(reduce, 1, Options) of
-        false ->
-            fun (reduce, KVs) ->
-                    length(KVs);
-                (rereduce, Reds) ->
-                    lists:sum(Reds)
-            end;
-        {_, ReduceFun0} ->
-            fun(reduce, KVs) ->
-                    Count = length(KVs),
-                    Result = ReduceFun0(reduce, KVs),
-                    {Count, Result};
-                (rereduce, Reds) ->
-                    Count = lists:sum([Count0 || {Count0, _} <- Reds]),
-                    UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
-                    Result = ReduceFun0(rereduce, UsrReds),
-                    {Count, Result}
-            end
-    end.
-
-
-log_reduce(reduce, KVS) ->
-    length(KVS);
-log_reduce(rereduce, Reds) ->
-    lists:sum(Reds).

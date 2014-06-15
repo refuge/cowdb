@@ -27,7 +27,8 @@
              log=nil,
              header,
              file_path,
-             fsync_options}).
+             fsync_options,
+             options}).
 
 
 -record(transaction, {tid,
