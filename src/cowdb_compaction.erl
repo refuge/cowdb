@@ -56,9 +56,6 @@ cancel(#db{compactor_info=Pid}=Db) ->
     delete_compact_file(Db),
     Db#db{compactor_info=nil}.
 
-
-
-
 %% do initiali compaction, copy the id btree.
 do_compact(#db{tid=LastTid, by_id=IdBt, reader_fd=ReaderFd},
            #db{fd=Fd, log=LogBt}=TargetDb, false) ->

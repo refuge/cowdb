@@ -74,6 +74,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 
     %% initial db record
     #db{tid=Tid,
+        start_time=timestamp(),
         db_pid=DbPid,
         updater_pid=self(),
         fd=Fd,
@@ -163,20 +164,26 @@ by_id_reduce(Options) ->
     case lists:keyfind(reduce, 1, Options) of
         false ->
             fun (reduce, KVs) ->
-                    length(KVs);
+                    Count = length(KVs),
+                    Size = lists:sum([S || {_, {_, {_, S}, _, _}} <- KVs]),
+                    {Count, Size};
                 (rereduce, Reds) ->
-                    lists:sum(Reds)
+                    Count = lists:sum([Count0 || {Count0, _} <- Reds]),
+                    AccSize = lists:sum([Size || {_, Size} <- Reds]),
+                    {Count, AccSize}
             end;
         {_, ReduceFun0} ->
             fun(reduce, KVs) ->
                     Count = length(KVs),
+                    Size = lists:sum([S || {_, {_, {_, S}, _, _}} <- KVs]),
                     Result = ReduceFun0(reduce, KVs),
-                    {Count, Result};
+                    {Count, Size, Result};
                 (rereduce, Reds) ->
-                    Count = lists:sum([Count0 || {Count0, _} <- Reds]),
+                    Count = lists:sum([Count0 || {Count0, _, _} <- Reds]),
+                    AccSize = lists:sum([Size || {_, Size, _} <- Reds]),
                     UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
                     Result = ReduceFun0(rereduce, UsrReds),
-                    {Count, Result}
+                    {Count, AccSize, Result}
             end
     end.
 

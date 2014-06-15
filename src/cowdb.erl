@@ -19,7 +19,9 @@
 -export([open/1, open/2,
          open_link/1, open_link/2,
          close/1,
+         db_info/1,
          count/1,
+         data_size/1,
          get/2,
          lookup/2,
          put/3,
@@ -109,7 +111,33 @@ close(DbPid) ->
         exit:{normal, _} -> ok
     end.
 
+%% @doc display database infos
+-spec db_info(db()) -> {ok, list()}.
+db_info(DbPid) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    db_info(Db);
+db_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
+            file_path=FilePath, header=#db_header{version=Version}}) ->
+    {ok, _, StartT} = cbt_btree:fold(LogBt, fun({TransactId, _}, _) ->
+                {stop, TransactId}
+        end, nil, []),
+    {ok, TxCount} = cbt_btree:full_reduce(LogBt),
+    {ok, DiskSize} = cbt_file:bytes(Fd),
 
+    {ObjCount, DataSize} =  case cbt_btree:full_reduce(IdBt) of
+        {ok, {Count, Size, _}} ->{Count, Size};
+        {ok, {Count, Size}} -> {Count, Size}
+    end,
+
+    {ok, [{file_path, FilePath},
+          {object_count, ObjCount},
+          {tx_count, TxCount},
+          {tx_start, StartT},
+          {tx_end, EndT},
+          {disk_size, DiskSize},
+          {data_size, DataSize},
+          {start_time, StartTime},
+          {db_version, Version}]}.
 
 %% @doc get the number of objects stored in the database.
 -spec count(db()) -> {ok, integer()} | {error, term()}.
@@ -118,9 +146,23 @@ count(DbPid) when is_pid(DbPid) ->
     count(Db);
 count(#db{by_id=IdBt}) ->
     case cbt_btree:full_reduce(IdBt) of
-        {ok, {Count, _}} -> {ok, Count};
-        {ok, Count} -> {ok, Count}
+        {ok, {Count, _, _}} -> {ok, Count};
+        {ok, {Count, _}} -> {ok, Count}
     end.
+
+%% @doc get the number of objects stored in the database.
+-spec data_size(db()) -> {ok, integer()} | {error, term()}.
+data_size(DbPid) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    data_size(Db);
+data_size(#db{by_id=IdBt, log=LogBt}) ->
+    VSize = case cbt_btree:full_reduce(IdBt) of
+        {ok, {_, Size, _}} -> Size;
+        {ok, {_, Size}} -> Size
+    end,
+    TotalSize = lists:sum([VSize, cbt_btree:size(IdBt),
+                           cbt_btree:size(LogBt)]),
+    {ok, TotalSize}.
 
 %% @doc get an object from its key
 -spec get(Db::db(), Key::any()) -> {ok, any()} | {error, term()}.

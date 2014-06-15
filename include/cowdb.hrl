@@ -19,6 +19,7 @@
                     log=nil}).
 
 -record(db, {tid=-1,
+             start_time,
              db_pid,
              updater_pid,
              compactor_info=nil,
