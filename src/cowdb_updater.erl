@@ -78,7 +78,7 @@ loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
                 {ok, Db1} ->
                     ok = gen_server:call(DbPid, {db_updated, Db1},
                                          infinity),
-                    {ok, Db1};
+                    {{ok, TransactId}, Db1};
                 Error ->
                     {Error, Db}
             end,
@@ -201,13 +201,19 @@ run_transaction([], {ToAdd, ToRem}, TransactId,
     {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
     %% reconstruct transactions operations for the log
     Ops0 = lists:foldl(fun({_K, V}, Acc) ->
-                    [{TransactId, {add, V}} | Acc]
+                    [{add, V} | Acc]
             end, [], ToAdd),
-    Ops = lists:reverse(lists:foldl(fun(V, Acc) ->
-                        [{TransactId, {remove, V}} | Acc]
+    Ops = lists:reverse(lists:foldl(
+                fun({ok, {_K, {Key, Pointer, _, Ts}}}, Acc) ->
+                        V1 = {Key, Pointer, TransactId, Ts},
+                        [{remove, V1} | Acc]
                 end, Ops0, Found)),
     %% store the new log
-    {ok, LogBt2} = cbt_btree:add(LogBt, Ops),
+    Transaction = {TransactId, #transaction{tid=TransactId,
+                                            by_id=cbt_btree:get_state(IdBt2),
+                                            ops=Ops,
+                                            ts = cowdb_util:timestamp()}},
+    {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
 run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, TransactId,
                 #db{fd=Fd}=Db) ->

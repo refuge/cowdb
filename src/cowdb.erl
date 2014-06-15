@@ -26,7 +26,8 @@
          delete/2,
          fold/3, fold/4,
          fold_reduce/4,
-         transact/2, transact/3]).
+         transact/2, transact/3,
+         log/4, log/5]).
 
 
 %% gen server callbacks
@@ -37,12 +38,22 @@
 -include("cowdb.hrl").
 -include_lib("cbt/include/cbt.hrl").
 
+-type timeout() :: infinity | integer().
+-export_type([timeout/0]).
+
 -type db() :: #db{} | pid().
 -export_type([db/0]).
 
--type storeid() :: term().
--opaque store() :: {db(), storeid()} | {db(), #btree{}}.
--export_type([storeid/0, store/0]).
+-type transact_fn() :: {module(), fun(), [any()]} |
+                       {module(), fun()} |
+                       fun().
+-type transact_id() :: integer() | tx_end.
+-type transact_ops() :: [{add, term(), any()} |
+                         {remove, term()} |
+                         {fn, transact_fn()}].
+-export_type([transact_fn/0,
+              transact_id/0,
+              transact_ops/0]).
 
 %% @doc open a cowdb database, pass a function to initialise the stores and
 %% indexes.
@@ -173,10 +184,12 @@ fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, ReduceFun0, Acc, Options) ->
                             Options).
 
 %% @doc add one object to a store
+-spec put(db(), term(), any()) -> {ok, transact_id()} | {error, term()}.
 put(DbPid, Key, Value) ->
     transact(DbPid, [{add, Key, Value}]).
 
-%% @delete one object from the store
+%% @doc delete one object from the store
+-spec delete(db(), term()) -> {ok, transact_id()} | {error, term()}.
 delete(DbPid, Key) ->
     transact(DbPid, [{remove, Key}]).
 
@@ -184,9 +197,8 @@ delete(DbPid, Key) ->
 %% @doc execute a transaction
 %% A transaction received operations to execute as a list:
 %% <ul>
-%% <li>`{add, StoreId, Obj}' to add an object</li>
-%% <li>`{remove, StoreId, Key}' to remove a value</li>
-%% <li> `{add_remove, StoreId, ToAdd, ToRemove}' to add and remove multiple keys and value at the same time</li>
+%% <li>`{add, Key, Value}' to add an object</li>
+%% <li>`{remove, Key}' to remove a value</li>
 %%<li> `{fn, Func}' a transaction function. A transaction function
 %%reveived the db value like it was at the beginning of the transaction
 %%as an argument. It's possible to pass arguments to it. A transaction
@@ -195,12 +207,80 @@ delete(DbPid, Key) ->
 %%function.</li>
 %%</ul>
 %%
+-spec transact(db(), transact_ops()) ->
+    {ok, transact_id()}
+    | {error, term()}.
 transact(Ref, OPs) ->
     transact(Ref, OPs, infinity).
 
+-spec transact(db(), transact_ops(), timeout()) ->
+    {ok, transact_id()}
+    | {error, term()}.
 transact(Ref, OPs, Timeout) ->
     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
     cowdb_updater:transact(UpdaterPid, OPs, Timeout).
+
+
+%% @doc fold the transaction log
+-spec log(Db::db(), StartT::transact_id(), Function::fun(), Acc::any()) ->
+    {ok, NbTransactions::integer(), Acc2::any()}
+    | {error, term()}.
+log(Db, StartT, Fun, Acc) ->
+    log(Db, StartT, tx_end, Fun, Acc).
+
+%% @doc fold the transaction log
+%% Args:
+%% <ul>
+%% <li>`Db': the db value (in transaction function) or pid</li>
+%% <li>`StartT': transaction ID to start from</li>
+%% <li>`EndT': transaction ID to stop</li>
+%% <li>`Fun': function collection log result:
+%% ```
+%% fun({TransactId, Op, {K,V}, Ts}, Acc) ->
+%%      {ok, Acc2} | {stop, Acc2}
+%%  end
+%% '''
+%% where TransactId is the transaction ID `Transactid' where the `OP'
+%% (`add' or `remove') on the Key/Value pair `{K, V}' has been run on
+%% the unix time `Ts'.</li>
+%% <li>`Acc': initial value to pass to the function.
+%% </ul>
+%% The function return the total number of transactions in the range and
+%% the values collected during folding.
+-spec log(Db::db(), StartT::transact_id(), EndT::transact_id(),
+          Function::fun(), Acc::any()) ->
+    {ok, NbTransactions::integer(), Acc2::any()}
+    | {error, term()}.
+log(DbPid, StartT, EndT, Fun, Acc) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    log(Db, StartT, EndT, Fun, Acc);
+log(#db{tid=LastTid, reader_fd=Fd, log=LogBt}, StartT, EndT0, Fun, Acc) ->
+    EndT = case EndT0 of
+        tx_end -> LastTid;
+        _ when EndT0 > LastTid -> LastTid;
+        _ -> EndT0
+    end,
+
+    Wrapper = fun({_TransactId, #transaction{ops=Ops}}, Acc1) ->
+            fold_log_ops(Ops, Fd, Fun, Acc1)
+    end,
+    {ok, {_, [Count]}, Result} = cbt_btree:fold(LogBt#btree{fd=Fd}, Wrapper,
+                                                Acc, [{start_key,  StartT},
+                                                      {end_key, EndT}]),
+    {ok, Count, Result}.
+
+
+%% fold operations in a transaction.
+fold_log_ops([], _Fd, _Fun, Acc) ->
+    {ok, Acc};
+fold_log_ops([{Op, {Key, {Pos, _}, TransactId, Ts}} | Rest], Fd, Fun, Acc) ->
+    {ok, Val} = cbt_file:pread_term(Fd, Pos),
+    case Fun({TransactId, Op, {Key, Val}, Ts}, Acc) of
+        {ok, Acc2} ->
+            fold_log_ops(Rest, Fd, Fun, Acc2);
+        {stop, Acc2} ->
+            {stop, Acc2}
+    end.
 
 %% --------------------
 %% gen_server callbacks

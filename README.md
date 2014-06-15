@@ -60,14 +60,14 @@ Example of usage:
 
     1> {ok, Pid} = cowdb:open("testing.db").
     {ok,<0.35.0>}
-    2> cowdb:put(Pid, a).
-    ok.
+    2> cowdb:put(Pid, a, 1).
+    {ok, 1}
     3> cowdb:get(Pid, a).
     {ok,{a,1}}
     4> cowdb:lookup(Pid, [a, b]).
     [{ok,{a,1}},not_found]
     5> cowdb:put(Pid, b, 2).
-    ok.
+    {ok, 2}
     6> cowdb:lookup(Pid, [a, b]).
     [{ok,{a,1}},{ok,{b,2}}]
     7> cowdb:lookup(Pid, [a, b, c, d]).
@@ -78,7 +78,7 @@ Example of usage:
         {fn, fun(Db) ->
                     {ok, {a, V}} = cowdb:get(Db, a),
                     [{add, d, V}] end}]).
-    ok
+    {ok, 3}
     9> cowdb:lookup(Pid, [a, b, c, d]).                                                             [{ok,{a,1}},not_found,{ok,{c,2}},{ok,{d,1}}]
     10> cowdb:fold(Pid, fun(Got, Acc) -> {ok, [Got | Acc]} end, []).
     {ok,{[],[3]},[{d,1},{c,2},{a,1}]}

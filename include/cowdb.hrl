@@ -18,8 +18,7 @@
                     by_id=nil,
                     log=nil}).
 
--record(db, {version,
-             tid=0,
+-record(db, {tid=0,
              db_pid,
              updater_pid,
              fd,
@@ -32,7 +31,7 @@
 
 
 -record(transaction, {tid,
-                      root,
+                      by_id=nil,
                       ops=[],
                       ts}).
 
