@@ -2,6 +2,7 @@
 
 -export([set_property/3, delete_property/2]).
 -export([apply/2]).
+-export([timestamp/0]).
 
 set_property(Key, Value, Props) ->
     case lists:keyfind(Key, 1, Props) of
@@ -27,4 +28,6 @@ apply(Func, Args) ->
             erlang:apply(F, Args)
     end.
 
-
+timestamp() ->
+    {A, B, _} = os:timestamp(),
+    (A * 1000000) + B.

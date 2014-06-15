@@ -14,10 +14,9 @@
 -define(DISK_VERSION, 1).
 
 -record(db_header, {version=?DISK_VERSION,
-                    db_version=1,
                     tid=0,
-                    root=nil,
-                    meta=[]}).
+                    by_id=nil,
+                    log=nil}).
 
 -record(db, {version,
              tid=0,
@@ -25,14 +24,17 @@
              updater_pid,
              fd,
              reader_fd,
-             root=nil,
-             meta=[],
-             stores=[],
-             old_stores=[],
-             db_mod,
+             by_id=nil,
+             log=nil,
              header,
              file_path,
              fsync_options}).
+
+
+-record(transaction, {tid,
+                      root,
+                      ops=[],
+                      ts}).
 
 -record(store, {db,
                 id}).
