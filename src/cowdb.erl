@@ -27,7 +27,8 @@
          fold/3, fold/4,
          fold_reduce/4,
          transact/2, transact/3,
-         log/4, log/5]).
+         log/4, log/5,
+         get_snapshot/2]).
 
 
 %% gen server callbacks
@@ -280,6 +281,22 @@ fold_log_ops([{Op, {Key, {Pos, _}, TransactId, Ts}} | Rest], Fd, Fun, Acc) ->
             fold_log_ops(Rest, Fd, Fun, Acc2);
         {stop, Acc2} ->
             {stop, Acc2}
+    end.
+
+%% @doc get a snapshot of the database at some point.
+-spec get_snapshot(db(), transact_id()) -> {ok, db()} | {error, term()}.
+get_snapshot(DbPid, TransactId) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    get_snapshot(Db, TransactId);
+get_snapshot(#db{tid=Tid}=Db, tx_end)->
+    get_snapshot(Db, Tid);
+get_snapshot(#db{log=LogBt, reader_fd=Fd, by_id=IdBt}=Db, TransactId) ->
+    case cbt_btree:lookup(LogBt#btree{fd=Fd}, [TransactId]) of
+        [not_found] ->
+            {error, not_found};
+        [{ok, {_TransactId, #transaction{by_id=SnapshotRoot}}}] ->
+            IdSnapshot = IdBt#btree{root=SnapshotRoot},
+            {ok, Db#db{by_id=IdSnapshot}}
     end.
 
 %% --------------------

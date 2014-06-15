@@ -136,6 +136,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 
     case proplists:get_value(init_func, Options) of
         undefined ->
+
             {ok, Db0};
         InitFunc ->
             TransactId = Tid + 1,
@@ -247,10 +248,10 @@ do_transaction(Fun, TransactId) ->
         erlang:erase(cowdb_trans)
     end.
 
-
-commit_transaction(TransactId,#db{by_id=IdBt,
-                                  log=LogBt,
-                                  header=OldHeader}=Db) ->
+%% commit the transction on the disk.
+commit_transaction(TransactId, #db{by_id=IdBt,
+                                   log=LogBt,
+                                   header=OldHeader}=Db) ->
 
     %% write the header
     NewHeader = OldHeader#db_header{tid=TransactId,
