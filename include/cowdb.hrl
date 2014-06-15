@@ -21,6 +21,7 @@
 -record(db, {tid=-1,
              db_pid,
              updater_pid,
+             compactor_info=nil,
              fd,
              reader_fd,
              by_id=nil,

@@ -28,7 +28,8 @@
          fold_reduce/4,
          transact/2, transact/3,
          log/4, log/5,
-         get_snapshot/2]).
+         get_snapshot/2,
+         compact/1]).
 
 
 %% gen server callbacks
@@ -221,6 +222,13 @@ transact(Ref, OPs, Timeout) ->
     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
     cowdb_updater:transact(UpdaterPid, OPs, Timeout).
 
+%% @doc compact the database file
+-spec compact(db()) -> {ok, pid()} | {error, term()}.
+compact(Ref) ->
+    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
+    cowdb_updater:compact(UpdaterPid, []).
+
+
 
 %% @doc fold the transaction log
 -spec log(Db::db(), StartT::transact_id(), Function::fun(), Acc::any()) ->
@@ -344,6 +352,10 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
+handle_info({'EXIT', Pid, normal}, Db) ->
+    io:format("fuck i got ~p~n for ~p", [Pid, Db]),
+
+    {noreply, Db};
 handle_info({'EXIT', _, Reason}, Db) ->
     {stop, Reason, Db};
 handle_info(_Info, State) ->
@@ -356,7 +368,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @private
 terminate(_Reason, #db{updater_pid=UpdaterPid, fd=Fd, reader_fd=ReaderFd}) ->
     %% close the updater pid
-    ok = cbt_util:shutdown_sync(UpdaterPid),
+    ok = cowdb_util:shutdown_sync(UpdaterPid),
     %% close file descriptors
     ok = cbt_file:close(Fd),
     ok = cbt_file:close(ReaderFd),

@@ -15,6 +15,7 @@
 %% PUBLIC API
 -export([start_link/5]).
 -export([transact/3]).
+-export([compact/2]).
 -export([get_db/1]).
 -export([call/3, call/4]).
 
@@ -47,6 +48,10 @@ transact(UpdaterPid, Ops, Timeout) ->
     do_call(UpdaterPid, transact, {Ops, Timeout}, infinity).
 
 
+compact(UpdaterPid, Options) ->
+    do_call(UpdaterPid, start_compact, Options, infinity).
+
+
 call(UpdaterPid, Label, Args) ->
     call(UpdaterPid, Label, Args, infinity).
 
@@ -77,7 +82,8 @@ init(DbPid, Fd, ReaderFd, FilePath, Options) ->
     end.
 
 
-loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
+loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
+         file_path=Path}=Db) ->
     receive
         {?MODULE, transact, {Tag, Client}, {OPs, Options}} ->
             TransactId = LastTid + 1,
@@ -93,6 +99,83 @@ loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
 
             Client ! {Tag, Reply},
             loop(Db2);
+
+        {?MODULE, start_compact, {Tag, Client}, Options} ->
+            case Db#db.compactor_info of
+                nil ->
+                    Pid = spawn_link(fun() ->
+                                    cowdb_compaction:start(Db, Options)
+                            end),
+                    Db2 = Db#db{compactor_info=Pid},
+                    ok = gen_server:call(DbPid, {db_updated, Db2},
+                                         infinity),
+                    Client ! {Tag, ok},
+                    loop(Db2);
+                _CompactorPid ->
+                    Client ! {Tag, ok},
+                    loop(Db)
+            end;
+        {?MODULE, compact_done, {_Tag, _Client}, _CompactFile}
+                when CompactInfo =:= nil ->
+            %% the compactor already exited
+            loop(Db);
+        {?MODULE, compact_done, {Tag, Client}, CompactFile} ->
+            #db{fd=Fd, reader_fd=ReaderFd, file_path=FilePath}=Db,
+            {ok, NewFd} = cbt_file:open(CompactFile),
+            {ok, NewReaderFd} = cbt_file:open(CompactFile, [read_only]),
+            {ok, NewHeader, _Pos} = cbt_file:read_header(NewFd),
+
+            #db{tid=Tid} = NewDb = cowdb_util:init_db(NewHeader, Db#db.db_pid,
+                                                      NewFd, NewReaderFd,
+                                                      FilePath,
+                                                      Db#db.options),
+
+            unlink(NewFd),
+            unlink(NewReaderFd),
+
+            case Db#db.tid == Tid of
+                true ->
+                    %% send to the db the new value
+                    ok = gen_server:call(DbPid, {db_updated, NewDb},
+                                         infinity),
+
+                    %% we are now ready to switch the file
+                    %% prevent write to the old file
+                    cbt_file:close(Fd),
+
+                    %% rename the old file path
+                    OldFilePath = FilePath ++ ".old",
+                    cbt_file:rename(ReaderFd, OldFilePath),
+
+                    %% rename the compact file
+                    cbt_file:rename(NewFd, FilePath),
+                    gen_server:call(NewReaderFd, {set_path, FilePath},
+                                    infinity),
+                    cbt_file:sync(NewFd),
+                    cbt_file:sync(NewReaderFd),
+
+                    %% now delete the old file
+                    cowdb_util:delete_file(OldFilePath),
+
+                    %% tell the compactor it can close.
+                    Client ! {Tag, ok},
+                    loop(NewDb);
+                false ->
+                    cbt_file:close(NewFd),
+                    cbt_file:close(NewReaderFd),
+                    Client ! {Tag, {retry, Db}}
+            end;
+        {?MODULE, cancel_compact, {Tag, Client}, []} ->
+            Db2 = case Db#db.compactor_info of
+                nil ->
+                    Db;
+                CompactorPid ->
+                    cowdb_util:shutdown_sync(CompactorPid),
+                    cowdb_compaction:delete_compact_file(Db),
+                    Db#db{compactor_info=nil}
+            end,
+            Client ! {Tag, ok},
+            loop(Db2);
         {?MODULE, get_db, {Tag, Client}, []} ->
             Client ! {Tag, {ok, Db}},
             loop(Db);
@@ -101,6 +184,8 @@ loop(#db{tid=LastTid, db_pid=DbPid, file_path=Path}=Db) ->
                 "cow updater of ~p received unexpected message ~p~n",
                 [Path, Msg])
     end.
+
+
 
 
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
@@ -159,7 +244,7 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
         {TransactId, {done, Resp}} ->
             Resp;
         {TransactId, cancel} ->
-            cbt_util:shutdown_sync(TransactPid),
+            cowdb_util:shutdown_sync(TransactPid),
             rollback_transaction(Db),
             {error, canceled}
     after Timeout ->

@@ -11,7 +11,9 @@
          init_db/6,
          maybe_sync/3,
          write_header/2,
-         commit_transaction/2]).
+         commit_transaction/2,
+         shutdown_sync/1,
+         delete_file/1, delete_file/2]).
 
 set_property(Key, Value, Props) ->
     case lists:keyfind(Key, 1, Props) of
@@ -115,6 +117,45 @@ commit_transaction(TransactId, #db{by_id=IdBt,
     ok = cowdb_util:write_header(NewHeader, Db),
     {ok, Db#db{tid=TransactId, header=NewHeader}}.
 
+
+%% @doc synchronous shutdown
+shutdown_sync(Pid) when not is_pid(Pid)->
+    ok;
+shutdown_sync(Pid) ->
+    MRef = erlang:monitor(process, Pid),
+    try
+        catch unlink(Pid),
+        catch exit(Pid, shutdown),
+        receive
+        {'DOWN', MRef, _, _, _} ->
+            receive
+            {'EXIT', Pid, _} ->
+                ok
+            after 0 ->
+                ok
+            end
+        end
+    after
+        erlang:demonitor(MRef, [flush])
+    end.
+
+%% @doc delete a file safely
+delete_file(FilePath) ->
+    delete_file(FilePath, false).
+
+delete_file(FilePath, Async) ->
+    DelFile = FilePath ++ cbt_util:uniqid(),
+    case file:rename(FilePath, DelFile) of
+    ok ->
+        if (Async) ->
+            spawn(file, delete, [DelFile]),
+            ok;
+        true ->
+            file:delete(DelFile)
+        end;
+    Error ->
+        Error
+    end.
 
 %% private functions
 %%
