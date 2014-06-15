@@ -341,7 +341,21 @@ handle_call(get_db, _From, Db) ->
 handle_call(get_updater, _From, #db{updater_pid=UpdaterPid}=Db) ->
     {reply, UpdaterPid, Db};
 
-handle_call({db_updated, Db}, _From, _State) ->
+
+handle_call({db_updated, #db{fd=Fd, reader_fd=ReaderFd}=Db}, _From,
+            #db{fd=Fd, reader_fd=ReaderFd}) ->
+    {reply, ok, Db};
+
+handle_call({db_updated, #db{fd=Fd, reader_fd=ReaderFd}=Db}, _From,
+            #db{fd=OldFd, reader_fd=OldReaderFd}) ->
+
+    %% unlink old fds
+    unlink(OldFd),
+    unlink(OldReaderFd),
+    %% link new fds
+    link(Fd),
+    link(ReaderFd),
+
     {reply, ok, Db};
 
 handle_call(_Msg, _From, State) ->
@@ -352,9 +366,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'EXIT', Pid, normal}, Db) ->
-    io:format("fuck i got ~p~n for ~p", [Pid, Db]),
-
+handle_info({'EXIT', _, normal}, Db) ->
     {noreply, Db};
 handle_info({'EXIT', _, Reason}, Db) ->
     {stop, Reason, Db};
