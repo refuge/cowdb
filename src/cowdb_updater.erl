@@ -134,17 +134,26 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
               file_path=FilePath,
               fsync_options=FSyncOptions},
 
-    case proplists:get_value(init_func, Options) of
-        undefined ->
 
+    ShouldInit = Tid < 0,
+    InitFunc = proplists:get_value(init_func, Options),
+
+    case {ShouldInit, InitFunc} of
+        {true, undefined} ->
+            Transaction = {0, #transaction{tid=0,
+                                           by_id=nil,
+                                           ops=[],
+                                           ts= cowdb_util:timestamp()}},
+            {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
+            commit_transaction(0, Db0#db{log=LogBt2});
+        {false, undefined} ->
             {ok, Db0};
-        InitFunc ->
+        {_, InitFunc} ->
             TransactId = Tid + 1,
             %% initialise the database with the init function.
             do_transaction(fun() ->
-                        case call_init(InitFunc, Db0) of
+                        case call_init(InitFunc, Tid, TransactId, Db0) of
                             {ok, Ops} ->
-
                                 %% an init function can return an initial
                                 %% transaction.
                                 run_transaction(Ops, {[], []}, TransactId,
@@ -261,8 +270,8 @@ commit_transaction(TransactId, #db{by_id=IdBt,
     {ok, Db#db{tid=TransactId, header=NewHeader}}.
 
 
-call_init(Fun, Db) ->
-    cowdb_util:apply(Fun, [Db]).
+call_init(Fun, OldTransactId, NewTransactId, Db) ->
+    cowdb_util:apply(Fun, [Db, OldTransactId, NewTransactId]).
 
 write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
     ok = maybe_sync(before_header, Fd, FsyncOptions),

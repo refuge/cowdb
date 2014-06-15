@@ -14,11 +14,11 @@
 -define(DISK_VERSION, 1).
 
 -record(db_header, {version=?DISK_VERSION,
-                    tid=0,
+                    tid=-1,
                     by_id=nil,
                     log=nil}).
 
--record(db, {tid=0,
+-record(db, {tid=-1,
              db_pid,
              updater_pid,
              fd,
