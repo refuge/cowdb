@@ -30,6 +30,8 @@
              header,
              file_path,
              fsync_options,
+             auto_compact=true,
+             compact_limit,
              options}).
 
 

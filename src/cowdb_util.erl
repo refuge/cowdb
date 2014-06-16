@@ -4,6 +4,9 @@
 -include_lib("cbt/include/cbt.hrl").
 
 
+-define(DEFAULT_COMPACT_LIMIT, 2048000).
+
+
 -export([set_property/3,
          delete_property/2,
          apply/2,
@@ -50,6 +53,10 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     FSyncOptions = cbt_util:get_opt(fsync_options, Options,
                                     DefaultFSyncOptions),
 
+    CompactLimit = cbt_util:get_opt(compact_limit, Options,
+                                    ?DEFAULT_COMPACT_LIMIT),
+    AutoCompact = cbt_util:get_opt(auto_compact, Options, true),
+
     %% maybe sync the header
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
 
@@ -84,6 +91,8 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
         header=Header,
         file_path=FilePath,
         fsync_options=FSyncOptions,
+        auto_compact=AutoCompact,
+        compact_limit=CompactLimit,
         options=Options}.
 
 %% @doc test if the db file should be synchronized or not depending on the

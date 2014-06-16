@@ -16,8 +16,8 @@
 
 
 %% PUBLIC API
--export([open/1, open/2,
-         open_link/1, open_link/2,
+-export([open/1, open/2, open/3,
+         open_link/1, open_link/2, open_link/3,
          close/1,
          db_info/1,
          count/1,
@@ -45,6 +45,26 @@
 -type timeout() :: infinity | integer().
 -export_type([timeout/0]).
 
+
+-type compression_method() :: snappy | lz4 | gzip
+                              | {deflate, Level::integer()} | none.
+-type fsync_options() :: [before_header | after_header | on_file_open].
+-type open_options() :: [{compression,compression_method()}
+                         | {fsync_options, fsync_options()}
+                         | auto_compact | {auto_compact, boolean()}
+                         | {compact_limit, integer()}
+                         | {reduce, fun()}
+                         | {less, fun()}
+                         | {init_func, fun()}].
+-type mfa() :: {local, Name::atom()}
+    | {global, GlobalName::term()}
+    | {via, ViaName::term()}.
+
+-export_type([compression_method/0,
+              fsync_options/0,
+              open_options/0,
+              mfa/0]).
+
 -type db() :: #db{} | pid().
 -export_type([db/0]).
 
@@ -70,13 +90,22 @@ open(FilePath) ->
 
 %% @doc open a cowdb database, pass a function to initialise the stores and
 %% indexes.
--spec open(FilePath::string(), Option::list()) ->
+-spec open(FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(FilePath, Options) ->
     SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
-    gen_server:start(?MODULE, [FilePath, Options], SpawnOpts).
+    gen_server:start(?MODULE, [FilePath, Options], [{spawn_opts, SpawnOpts}]).
 
+
+%% @doc Create or open a hanoidb store with a registered name.
+- spec open(Name::mfa(), FilePath::string(), Option::open_options()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
+open(Name, FilePath, Options) ->
+    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    gen_server:start(Name, ?MODULE, [FilePath, Options],
+                     [{spawn_opts, SpawnOpts}]).
 
 %% @doc open a cowdb databas as part of the supervision treee, pass a
 %% function to initialise the stores and indexes.
@@ -87,17 +116,25 @@ open(FilePath, Options) ->
 open_link(FilePath) ->
     open_link(FilePath, []).
 
-
-%% @doc open a cowdb database as art of the supervision tree, pass a
-%% function to initialise the stores and indexes.
--spec open_link(FilePath::string(), Option::list()) ->
+%% @doc open a cowdb database as part of the supervision tree
+-spec open_link(FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 
 open_link(FilePath, Options) ->
     SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
-    gen_server:start_link(?MODULE, [FilePath, Options], SpawnOpts).
+    gen_server:start_link(?MODULE, [FilePath, Options],
+                          [{spawn_opts, SpawnOpts}]).
 
+%% @doc open a cowdb database as part of the supervision tree with a
+%% registerd name
+- spec open_link(Name::mfa(), FilePath::string(), Option::open_options()) ->
+    {ok, Db::pid()}
+    | {error, term()}.
+open_link(Name, FilePath, Options) ->
+    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    gen_server:start_link(Name, ?MODULE, [FilePath, Options],
+                          [{spawn_opts, SpawnOpts}]).
 
 %% @doc Close the file.
 -spec close(DbPid::pid()) -> ok.
@@ -117,7 +154,8 @@ db_info(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     db_info(Db);
 db_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
-            file_path=FilePath, header=#db_header{version=Version}}) ->
+            compactor_info=Compactor, file_path=FilePath,
+            header=#db_header{version=Version}}) ->
     {ok, _, StartT} = cbt_btree:fold(LogBt, fun({TransactId, _}, _) ->
                 {stop, TransactId}
         end, nil, []),
@@ -134,6 +172,7 @@ db_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
           {tx_count, TxCount},
           {tx_start, StartT},
           {tx_end, EndT},
+          {compact_running, Compactor/=nil},
           {disk_size, DiskSize},
           {data_size, DataSize},
           {start_time, StartTime},

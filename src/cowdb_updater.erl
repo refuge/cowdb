@@ -97,9 +97,32 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
                     {Error, Db}
             end,
 
+            %% send the reply to the client
             Client ! {Tag, Reply},
-            loop(Db2);
 
+            %% check if we need to compact, if true it will trigger a
+            %% background_compact message.
+            case maybe_compact(Db2) of
+                true ->
+                    self() ! {?MODULE, background_compact};
+                false ->
+                    ok
+            end,
+            loop(Db2);
+        {?MODULE, background_compact} ->
+            Db2 = case Db#db.compactor_info of
+                nil ->
+                    Pid = spawn_link(fun() ->
+                                    cowdb_compaction:start(Db, [])
+                            end),
+                    Db1 = Db#db{compactor_info=Pid},
+                    ok = gen_server:call(DbPid, {db_updated, Db1},
+                                         infinity),
+                    Db1;
+                _ ->
+                    Db
+            end,
+            loop(Db2);
         {?MODULE, start_compact, {Tag, Client}, Options} ->
             case Db#db.compactor_info of
                 nil ->
@@ -124,15 +147,13 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
             {ok, NewFd} = cbt_file:open(CompactFile),
             {ok, NewReaderFd} = cbt_file:open(CompactFile, [read_only]),
             {ok, NewHeader, _Pos} = cbt_file:read_header(NewFd),
-
             #db{tid=Tid} = NewDb = cowdb_util:init_db(NewHeader, Db#db.db_pid,
                                                       NewFd, NewReaderFd,
                                                       FilePath,
                                                       Db#db.options),
-
             unlink(NewFd),
             unlink(NewReaderFd),
-
+            %% check if we need to relaunch the compaction or not.
             case Db#db.tid == Tid of
                 true ->
                     %% send to the db the new value
@@ -336,3 +357,10 @@ do_call(UpdaterPid, Label, Request, Timeout) ->
             erlang:demonitor(Tag, [flush]),
             exit(timeout)
     end.
+
+
+maybe_compact(#db{auto_compact=false}) ->
+    false;
+maybe_compact(#db{fd=Fd, compact_limit=Limit}) ->
+    Size = cbt_file:bytes(Fd),
+    Size >= Limit.
