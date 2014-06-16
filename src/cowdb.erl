@@ -27,6 +27,7 @@
          put/3,
          delete/2,
          fold/3, fold/4,
+         full_reduce/1,
          fold_reduce/4,
          transact/2, transact/3,
          log/4, log/5,
@@ -251,6 +252,19 @@ fold(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
                                      Options),
     {ok, AccOut}.
 
+
+%% @doc return the full reduced value
+-spec full_reduce(db()) -> {ok, any()}.
+full_reduce(DbPid) when is_pid(DbPid) ->
+    Db = gen_server:call(DbPid, get_db, infinity),
+    full_reduce(Db);
+full_reduce(#db{by_id=IdBt}) ->
+    case cbt_btree:full_reduce(IdBt) of
+        {ok, {_, _}} ->
+            {ok, []};
+        {ok, {_, _, UsrRed}} ->
+            {ok, UsrRed}
+    end.
 
 %% @doc fold the reduce function over the results.
 fold_reduce(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
