@@ -55,7 +55,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 
     CompactLimit = cbt_util:get_opt(compact_limit, Options,
                                     ?DEFAULT_COMPACT_LIMIT),
-    AutoCompact = cbt_util:get_opt(auto_compact, Options, true),
+    AutoCompact = cbt_util:get_opt(auto_compact, Options, false),
 
     %% maybe sync the header
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),

@@ -30,7 +30,7 @@
              header,
              file_path,
              fsync_options,
-             auto_compact=true,
+             auto_compact=false,
              compact_limit,
              reduce_fun=nil,
              options}).
