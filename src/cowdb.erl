@@ -229,8 +229,7 @@ lookup(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
                 [Else | Acc]
         end, [], Results).
 
-%% @doc fold all objects form the dabase
-%% @doc fold all objects form the database with range options
+%% @doc fold all objects form the database
 -spec fold(db(), fun(), any()) -> {ok, any(), any()} | {error, term()}.
 fold(DbPid, Fun, Acc) ->
     fold(DbPid, Fun, Acc, []).
