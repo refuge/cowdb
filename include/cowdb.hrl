@@ -14,23 +14,31 @@
 -define(DISK_VERSION, 1).
 
 -record(db_header, {version=?DISK_VERSION,
-                    db_version=1,
-                    root=nil,
-                    meta=[]}).
+                    tid=-1,
+                    by_id=nil,
+                    log=nil}).
 
--record(db, {version,
+-record(db, {tid=-1,
+             start_time,
              db_pid,
              updater_pid,
+             compactor_info=nil,
              fd,
              reader_fd,
-             root=nil,
-             meta=[],
-             stores=[],
-             old_stores=[],
-             db_mod,
+             by_id=nil,
+             log=nil,
              header,
              file_path,
-             fsync_options}).
+             fsync_options,
+             auto_compact=true,
+             compact_limit,
+             options}).
+
+
+-record(transaction, {tid,
+                      by_id=nil,
+                      ops=[],
+                      ts}).
 
 -record(store, {db,
                 id}).

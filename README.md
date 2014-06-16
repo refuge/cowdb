@@ -58,26 +58,30 @@ and open the `index.html` file in the doc folder. Or read it
 
 Example of usage:
 
-        
-    1> {ok, Pid} = cowdb:open("testing.db",
-            1> fun(St, Db) -> cowdb:open_store(Db, "test") end).
+    1> {ok, Pid} = cowdb:open("testing.db").
     {ok,<0.35.0>}
-    2> cowdb:lookup(Pid, "test", [a,b]).
-    [{ok,{a,1}},{ok,{b,2}}]
-    3> cowdb:lookup(Pid, "test", [a,b,c]).
-    [{ok,{a,1}},{ok,{b,2}},not_found]
-    4> cowdb:transact(Pid, [{remove, "test", b}, {add, "test", {c,
-            3}}]).
-    ok
-    5> cowdb:lookup(Pid, "test", [a,b,c]).
-    [{ok,{a,1}},not_found,{ok,{c,3}}]
-    6> cowdb:get(Pid, "test", a).
+    2> cowdb:put(Pid, a, 1).
+    {ok, 1}
+    3> cowdb:get(Pid, a).
     {ok,{a,1}}
-    7> cowdb:transact(Pid, [{fn, fun(Db) -> [{add, "test", {d, 2}}]
-            end}]).
-    ok
-    8> cowdb:lookup(Pid, "test", [d]).
-    [{ok,{d,2}}]
+    4> cowdb:lookup(Pid, [a, b]).
+    [{ok,{a,1}},not_found]
+    5> cowdb:put(Pid, b, 2).
+    {ok, 2}
+    6> cowdb:lookup(Pid, [a, b]).
+    [{ok,{a,1}},{ok,{b,2}}]
+    7> cowdb:lookup(Pid, [a, b, c, d]).
+    [{ok,{a,1}},{ok,{b,2}},not_found,not_found]
+    8> cowdb:transact(Pid, [
+        {add, c, 2},
+        {remove, b},
+        {fn, fun(Db) ->
+                    {ok, {a, V}} = cowdb:get(Db, a),
+                    [{add, d, V}] end}]).
+    {ok, 3}
+    9> cowdb:lookup(Pid, [a, b, c, d]).                                                             [{ok,{a,1}},not_found,{ok,{c,2}},{ok,{d,1}}]
+    10> cowdb:fold(Pid, fun(Got, Acc) -> {ok, [Got | Acc]} end, []).
+    {ok,{[],[3]},[{d,1},{c,2},{a,1}]}
 
 ## contribute
 

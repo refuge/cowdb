@@ -10,19 +10,21 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
-
 -module(cowdb_updater).
 
-
 %% PUBLIC API
--export([start_link/6]).
--export([transaction_type/0]).
+-export([start_link/5]).
 -export([transact/3]).
+-export([compact/2, cancel_compact/1]).
 -export([get_db/1]).
+-export([call/3, call/4]).
+
 
 %% proc lib export
--export([init/6]).
+-export([init/5]).
 
+%% compaction util export
+-export([init_db/6]).
 
 
 -include("cowdb.hrl").
@@ -31,30 +33,35 @@
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
 
-
-
-
-start_link(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
+start_link(DbPid, Fd, ReaderFd, FilePath, Options) ->
     proc_lib:start_link(?MODULE, init, [DbPid, Fd, ReaderFd, FilePath,
-                                        InitFunc, Options]).
+                                        Options]).
 
-
-%% @doc get current transaction type
--spec transaction_type() -> trans_type().
-transaction_type() ->
-    erlang:get(cowdb_trans).
 
 %% @doc get latest db state.
 -spec get_db(pid()) -> cowdb:db().
 get_db(Pid) ->
     do_call(Pid, get_db, [], infinity).
 
-
+%% @doc send a transaction and wait for its result.
 transact(UpdaterPid, Ops, Timeout) ->
-    TransactId = make_ref(),
-    do_call(UpdaterPid, transact, {TransactId, Ops, Timeout}, infinity).
+    do_call(UpdaterPid, transact, {Ops, Timeout}, infinity).
 
-init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
+
+compact(UpdaterPid, Options) ->
+    do_call(UpdaterPid, start_compact, Options, infinity).
+
+cancel_compact(UpdaterPid) ->
+    do_call(UpdaterPid, cancel_compact, [], infinity).
+
+call(UpdaterPid, Label, Args) ->
+    call(UpdaterPid, Label, Args, infinity).
+
+call(UpdaterPid, Label, Args, Timeout) ->
+    do_call(UpdaterPid, Label, Args, Timeout).
+
+
+init(DbPid, Fd, ReaderFd, FilePath, Options) ->
     Header = case cbt_file:read_header(Fd) of
         {ok, Header1, _Pos} ->
             Header1;
@@ -64,8 +71,9 @@ init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
             Header1
     end,
 
-    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc,
-                       Options) of
+
+    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath,
+                          Options) of
         {ok, Db} ->
             proc_lib:init_ack({ok, self()}),
             loop(Db);
@@ -76,20 +84,120 @@ init(DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
     end.
 
 
-loop(#db{db_pid=DbPid, file_path=Path}=Db) ->
+loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
+         file_path=Path}=Db) ->
     receive
-        {?MODULE, transact, {Tag, Client}, {TransactId, OPs, Options}} ->
+        {?MODULE, transact, {Tag, Client}, {OPs, Options}} ->
+            TransactId = LastTid + 1,
             {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
                                                           Options, Db) of
                 {ok, Db1} ->
                     ok = gen_server:call(DbPid, {db_updated, Db1},
                                          infinity),
-                    {ok, Db1};
+                    {{ok, TransactId}, Db1};
                 Error ->
                     {Error, Db}
             end,
 
+            %% send the reply to the client
             Client ! {Tag, Reply},
+
+            %% check if we need to compact, if true it will trigger a
+            %% background_compact message.
+            case maybe_compact(Db2) of
+                true ->
+                    self() ! {?MODULE, background_compact};
+                false ->
+                    ok
+            end,
+            loop(Db2);
+        {?MODULE, background_compact} ->
+            Db2 = case Db#db.compactor_info of
+                nil ->
+                    Pid = spawn_link(fun() ->
+                                    cowdb_compaction:start(Db, [])
+                            end),
+                    Db1 = Db#db{compactor_info=Pid},
+                    ok = gen_server:call(DbPid, {db_updated, Db1},
+                                         infinity),
+                    Db1;
+                _ ->
+                    Db
+            end,
+            loop(Db2);
+        {?MODULE, start_compact, {Tag, Client}, Options} ->
+            case Db#db.compactor_info of
+                nil ->
+                    Pid = spawn_link(fun() ->
+                                    cowdb_compaction:start(Db, Options)
+                            end),
+                    Db2 = Db#db{compactor_info=Pid},
+                    ok = gen_server:call(DbPid, {db_updated, Db2},
+                                         infinity),
+                    Client ! {Tag, ok},
+                    loop(Db2);
+                _CompactorPid ->
+                    Client ! {Tag, ok},
+                    loop(Db)
+            end;
+        {?MODULE, compact_done, {_Tag, _Client}, _CompactFile}
+                when CompactInfo =:= nil ->
+            %% the compactor already exited
+            loop(Db);
+        {?MODULE, compact_done, {Tag, Client}, CompactFile} ->
+            #db{fd=Fd, reader_fd=ReaderFd, file_path=FilePath}=Db,
+            {ok, NewFd} = cbt_file:open(CompactFile),
+            {ok, NewReaderFd} = cbt_file:open(CompactFile, [read_only]),
+            {ok, NewHeader, _Pos} = cbt_file:read_header(NewFd),
+            #db{tid=Tid} = NewDb = cowdb_util:init_db(NewHeader, Db#db.db_pid,
+                                                      NewFd, NewReaderFd,
+                                                      FilePath,
+                                                      Db#db.options),
+            unlink(NewFd),
+            unlink(NewReaderFd),
+            %% check if we need to relaunch the compaction or not.
+            case Db#db.tid == Tid of
+                true ->
+                    %% send to the db the new value
+                    ok = gen_server:call(DbPid, {db_updated, NewDb},
+                                         infinity),
+
+                    %% we are now ready to switch the file
+                    %% prevent write to the old file
+                    cbt_file:close(Fd),
+
+                    %% rename the old file path
+                    OldFilePath = FilePath ++ ".old",
+                    cbt_file:rename(ReaderFd, OldFilePath),
+
+                    %% rename the compact file
+                    cbt_file:rename(NewFd, FilePath),
+                    gen_server:call(NewReaderFd, {set_path, FilePath},
+                                    infinity),
+                    cbt_file:sync(NewFd),
+                    cbt_file:sync(NewReaderFd),
+
+                    %% now delete the old file
+                    cowdb_util:delete_file(OldFilePath),
+
+                    %% tell the compactor it can close.
+                    Client ! {Tag, ok},
+                    loop(NewDb);
+                false ->
+                    cbt_file:close(NewFd),
+                    cbt_file:close(NewReaderFd),
+                    Client ! {Tag, {retry, Db}}
+            end;
+        {?MODULE, cancel_compact, {Tag, Client}, []} ->
+            Db2 = case Db#db.compactor_info of
+                nil ->
+                    Db;
+                CompactorPid ->
+                    cowdb_util:shutdown_sync(CompactorPid),
+                    cowdb_compaction:delete_compact_file(Db),
+                    Db#db{compactor_info=nil}
+            end,
+            Client ! {Tag, ok},
             loop(Db2);
         {?MODULE, get_db, {Tag, Client}, []} ->
             Client ! {Tag, {ok, Db}},
@@ -101,67 +209,41 @@ loop(#db{db_pid=DbPid, file_path=Path}=Db) ->
     end.
 
 
-init_db(Header, DbPid, Fd, ReaderFd, FilePath, InitFunc, Options) ->
-    NewVersion = proplists:get_value(db_version, Options, 1),
-    DefaultFSyncOptions = [before_header, after_header, on_file_open],
-    FSyncOptions = cbt_util:get_opt(fsync_options, Options,
-                                      DefaultFSyncOptions),
-
-    ok = maybe_sync(on_file_open, Fd, FSyncOptions),
-
-    #db_header{db_version=OldVersion,
-               root=RootP,
-               meta=Meta} = Header,
-
-    {ok, Root} = cbt_btree:open(RootP, Fd),
-
-    Stores = case RootP of
-        nil -> [];
-        _ ->
-            {ok, _, Stores1} = cbt_btree:fold(Root, fun({Id, P}, Acc) ->
-                            {ok, [{Id, P} | Acc]}
-                    end, []),
-            Stores1
-    end,
-
-    Db0 = #db{version =NewVersion,
-              db_pid=DbPid,
-              updater_pid=self(),
-              fd=Fd,
-              reader_fd=ReaderFd,
-              root=Root,
-              meta=Meta,
-              stores=lists:reverse(Stores),
-              header=Header,
-              file_path=FilePath,
-              fsync_options=FSyncOptions},
 
 
-    %% retrieve the initialisation status, check if the database need to
-    %% be upgraded.
-    InitStatus = case {OldVersion, RootP} of
-        {NewVersion, nil} ->
-            init;
-        {NewVersion, _} ->
-            current;
-        _ ->
-            {upgrade, NewVersion, OldVersion}
-    end,
+init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
+    Db = cowdb_util:init_db(Header, DbPid, Fd, ReaderFd, FilePath,
+                             Options),
 
+    #db{tid=Tid, log=LogBt} = Db,
 
-    %% initialise the database with the init function.
-    do_transaction(fun() ->
-                    case call_init(InitFunc, InitStatus, Db0) of
-                        {ok, Db2} ->
-                            {ok, Db2};
-                        {ok, Db2, Ops} ->
-                            %% an init function can return an initial
-                            %% transaction.
-                            run_transaction(Ops, Db2);
-                        Error ->
-                            Error
-                    end
-            end, version_change).
+    ShouldInit = Tid < 0,
+    InitFunc = proplists:get_value(init_func, Options),
+
+    case {ShouldInit, InitFunc} of
+        {true, undefined} ->
+            Transaction = {0, #transaction{by_id=nil,
+                                           ops=[],
+                                           ts= cowdb_util:timestamp()}},
+            {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
+            cowdb_util:commit_transaction(0, Db#db{log=LogBt2});
+        {false, undefined} ->
+            {ok, Db};
+        {_, InitFunc} ->
+            TransactId = Tid + 1,
+            %% initialise the database with the init function.
+            do_transaction(fun() ->
+                        case call_init(InitFunc, Tid, TransactId, Db) of
+                            {ok, Ops} ->
+                                %% an init function can return an initial
+                                %% transaction.
+                                run_transaction(Ops, {[], []}, TransactId,
+                                                Db);
+                            Error ->
+                                Error
+                        end
+                end, TransactId)
+    end.
 
 handle_transaction(TransactId, OPs, Timeout, Db) ->
     UpdaterPid = self(),
@@ -170,8 +252,9 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
     TransactPid = spawn(fun() ->
                     %% execute the transaction
                     Resp = do_transaction(fun() ->
-                                    run_transaction(OPs, Db)
-                            end, update),
+                                    run_transaction(OPs, {[], []},
+                                                    TransactId, Db)
+                            end, TransactId),
 
                     UpdaterPid ! {TransactId, {done, Resp}}
             end),
@@ -184,7 +267,7 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
         {TransactId, {done, Resp}} ->
             Resp;
         {TransactId, cancel} ->
-            cbt_util:shutdown_sync(TransactPid),
+            cowdb_util:shutdown_sync(TransactPid),
             rollback_transaction(Db),
             {error, canceled}
     after Timeout ->
@@ -201,51 +284,55 @@ rollback_transaction(#db{fd=Fd, header=Header}) ->
     ok= cbt_file:sync(Fd),
     ok.
 
-run_transaction([], Db) ->
-    {ok, Db};
-run_transaction([{set_meta, Key, Value} | Rest], #db{meta=Meta}=Db) ->
-    Meta2 = cowdb_util:set_property(Key, Value, Meta),
-    run_transaction(Rest, Db#db{meta=Meta2});
-run_transaction([{delete_meta, Key} | Rest], #db{meta=Meta}=Db) ->
-    Meta2 = cowdb_util:delete_property(Key, Meta),
-    run_transaction(Rest, Db#db{meta=Meta2});
-run_transaction([{add, StoreId, ToAdd} | Rest], Db) ->
-    %% add a value
-    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, []),
-    run_transaction(Rest, Db2);
-run_transaction([{remove, StoreId, ToRem} | Rest],  Db) ->
+run_transaction([], {ToAdd, ToRem}, TransactId,
+                #db{by_id=IdBt, log=LogBt}=Db) ->
+    %% we atomically store the transaction.
+    {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
+
+
+    %% reconstruct transactions operations for the log
+    Ops0 = lists:foldl(fun({_K, V}, Acc) ->
+                    [{add, V} | Acc]
+            end, [], ToAdd),
+    Ops = lists:reverse(lists:foldl(fun
+                    ({ok, {_K, {Key, Pointer, _, Ts}}}, Acc) ->
+                        V1 = {Key, Pointer, TransactId, Ts},
+                        [{remove, V1} | Acc];
+                    ({not_found, _}, Acc) ->
+                        Acc
+                end, Ops0, Found)),
+    %% store the new log
+    Transaction = {TransactId, #transaction{tid=TransactId,
+                                            by_id=cbt_btree:get_state(IdBt2),
+                                            ops=Ops,
+                                            ts=cowdb_util:timestamp()}},
+    {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
+    {ok, Db#db{by_id=IdBt2, log=LogBt2}};
+run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, TransactId,
+                #db{fd=Fd}=Db) ->
+    %% we are storing the value directly in the file, the btrees will
+    %% only keep a reference so we don't have the value multiple time.
+    {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
+    Ts = cowdb_util:timestamp(),
+    Value1 =  {Key, {Pos, Size}, TransactId, Ts},
+    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem}, TransactId, Db);
+run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, TransactId, Db) ->
     %% remove a key
-    {ok, _, Db2} = query_modify(StoreId, Db, [], [], ToRem),
-    run_transaction(Rest, Db2);
-run_transaction([{add_remove, StoreId, ToAdd, ToRem} | Rest], Db) ->
-    %% add remove keys
-    {ok, _, Db2} = query_modify(StoreId, Db, [], ToAdd, ToRem),
-    run_transaction(Rest, Db2);
-run_transaction([{query_modify, StoreId, ToFind, ToAdd, ToRem, Func} | Rest],
-                Db) ->
-    {ok, Found, Db2} = query_modify(StoreId, Db, ToFind, ToAdd, ToRem),
-    Ops = cowdb_util:apply(Func, [Db, Found]),
-    case run_transaction(Ops, Db) of
-        {ok, Db2} ->
-            run_transaction(Rest, Db2);
-        Else ->
-            Else
-    end;
-run_transaction([{fn, Func} | Rest], Db) ->
+    run_transaction(Rest, {ToAdd, [Key | ToRem]}, TransactId, Db);
+run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
     %% execute a transaction function
     Ops = cowdb_util:apply(Func, [Db]),
-    {ok, Db2} = run_transaction(Ops, Db),
-    run_transaction(Rest, Db2);
-run_transaction(_, _) ->
+    run_transaction(Ops ++ Rest, AddRemove, TransactId, Db);
+run_transaction(_, _, _, _) ->
     {error, unknown_op}.
 
 %% execute transactoin
-do_transaction(Fun, Status) ->
-    erlang:put(cowdb_trans, Status),
+do_transaction(Fun, TransactId) ->
+    erlang:put(cowdb_trans, TransactId),
     try
         case catch Fun() of
             {ok, Db} ->
-                commit_transaction(Status, Db);
+                cowdb_util:commit_transaction(TransactId, Db);
             Error ->
                 Error
         end
@@ -253,88 +340,8 @@ do_transaction(Fun, Status) ->
         erlang:erase(cowdb_trans)
     end.
 
-%% TODO: improve the transacton commit to make it faster.
-commit_transaction(version_change, #db{root=Root, meta=Meta, stores=Stores,
-                                       old_stores=OldStores,
-                                       header=OldHeader}=Db) ->
-
-    %% update the root tree
-    ToRemove = lists:foldl(fun({K, _P}, Acc) ->
-                    case lists:keyfind(K, 1, Stores) of
-                        false -> [K |Acc];
-                        _ -> Acc
-                    end
-            end, [], OldStores),
-    ToAdd = [{K, cbt_btree:get_state(Btree)} || {K, Btree} <- Stores],
-    {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, ToRemove),
-
-    %% commit the transactions
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
-                                    meta=Meta},
-    ok = write_header(NewHeader, Db),
-
-    %% return the new db
-    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd}};
-commit_transaction(_,  #db{root=Root, meta=Meta, stores=Stores,
-                           old_stores = OldStores,
-                           header=OldHeader}=Db) ->
-
-    %% look at updated root to only store their changes
-    ToAdd0 = [{K, cbt_btree:get_state(Btree)} || {K, Btree} <- Stores],
-    ToAdd = ToAdd0 -- OldStores,
-    %% store the new root
-    {ok, Root2} = cbt_btree:add_remove(Root, ToAdd, []),
-    %% write the header
-    NewHeader = OldHeader#db_header{root=cbt_btree:get_state(Root2),
-                                    meta=Meta},
-    ok = write_header(NewHeader, Db),
-    {ok, Db#db{root=Root2, meta=Meta, header=NewHeader, old_stores=ToAdd0}}.
-
-
-call_init(Fun, InitStatus, Db) ->
-    cowdb_util:apply(Fun, [InitStatus, Db]).
-
-query_modify(StoreId, Db, LookupKeys, InsertValues, RemoveKeys) ->
-    case get_store(StoreId, Db) of
-        {ok, Store} ->
-            {ok, KVs, Store2} = cbt_btree:query_modify(Store, LookupKeys,
-                                                       InsertValues,
-                                                       RemoveKeys),
-            Db2 = set_store(StoreId, Store2, Db),
-            {ok, KVs, Db2};
-        false ->
-            {error, {unknown_store, StoreId}}
-    end.
-
-get_store(StoreId, #db{stores=Stores}) ->
-    case lists:keyfind(StoreId, 1, Stores) of
-        false -> false;
-        {StoreId, Store} -> {ok, Store}
-    end.
-
-set_store(StoreId, Store,  #db{stores=[]}=Db) ->
-    Db#db{stores=[{StoreId, Store}]};
-set_store(StoreId, Store,  #db{stores=Stores}=Db) ->
-    NStores = lists:keyreplace(StoreId, 1, Stores, {StoreId, Store}),
-    Db#db{stores=NStores}.
-
-
-write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
-    ok = maybe_sync(before_header, Fd, FsyncOptions),
-    {ok, _} = cbt_file:write_header(Fd, Header),
-    ok = maybe_sync(after_headerr, Fd, FsyncOptions),
-    ok.
-
-maybe_sync(Status, Fd, FSyncOptions) ->
-    case lists:member(Status, FSyncOptions) of
-        true ->
-            ok = cbt_file:sync(Fd),
-            ok;
-        _ ->
-            ok
-    end.
-
-
+call_init(Fun, OldTransactId, NewTransactId, Db) ->
+    cowdb_util:apply(Fun, [Db, OldTransactId, NewTransactId]).
 
 do_call(UpdaterPid, Label, Request, Timeout) ->
     Tag = erlang:monitor(process, UpdaterPid),
@@ -352,3 +359,10 @@ do_call(UpdaterPid, Label, Request, Timeout) ->
             erlang:demonitor(Tag, [flush]),
             exit(timeout)
     end.
+
+
+maybe_compact(#db{auto_compact=false}) ->
+    false;
+maybe_compact(#db{fd=Fd, compact_limit=Limit}) ->
+    Size = cbt_file:bytes(Fd),
+    Size >= Limit.
