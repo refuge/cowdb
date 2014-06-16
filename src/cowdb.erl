@@ -104,7 +104,7 @@ open(FilePath, Options) ->
     gen_server:start(?MODULE, [FilePath, Options], [{spawn_opts, SpawnOpts}]).
 
 
-%% @doc Create or open a hanoidb store with a registered name.
+%% @doc Create or open a cowdb store with a registered name.
 - spec open(Name::mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
