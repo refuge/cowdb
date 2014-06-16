@@ -31,7 +31,8 @@
          transact/2, transact/3,
          log/4, log/5,
          get_snapshot/2,
-         compact/1]).
+         compact/1,
+         cancel_compact/1]).
 
 
 %% gen server callbacks
@@ -309,7 +310,11 @@ compact(Ref) ->
     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
     cowdb_updater:compact(UpdaterPid, []).
 
-
+%% @doc cancel compaction
+-spec cancel_compact(db()) -> ok.
+cancel_compact(Ref) ->
+     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
+    cowdb_updater:cancel_compact(UpdaterPid).
 
 %% @doc fold the transaction log
 -spec log(Db::db(), StartT::transact_id(), Function::fun(), Acc::any()) ->

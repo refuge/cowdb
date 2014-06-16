@@ -15,7 +15,7 @@
 %% PUBLIC API
 -export([start_link/5]).
 -export([transact/3]).
--export([compact/2]).
+-export([compact/2, cancel_compact/1]).
 -export([get_db/1]).
 -export([call/3, call/4]).
 
@@ -51,6 +51,8 @@ transact(UpdaterPid, Ops, Timeout) ->
 compact(UpdaterPid, Options) ->
     do_call(UpdaterPid, start_compact, Options, infinity).
 
+cancel_compact(UpdaterPid) ->
+    do_call(UpdaterPid, cancel_compact, [], infinity).
 
 call(UpdaterPid, Label, Args) ->
     call(UpdaterPid, Label, Args, infinity).
