@@ -237,7 +237,7 @@ fold(DbPid, Fun, Acc) ->
 
 %% @doc fold all objects form the database with range options
 -spec fold(db(), fun(), any(), fold_options())
-    -> {ok, any(), any()}
+    -> {ok, any()}
     | {error, term()}.
 fold(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
@@ -247,7 +247,9 @@ fold(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
             {ok, Val} = cbt_file:pread_term(Fd, Pos),
             Fun({Key, Val}, Acc1)
     end,
-    cbt_btree:fold(IdBt#btree{fd=Fd}, Wrapper, Acc, Options).
+    {ok, _, AccOut} = cbt_btree:fold(IdBt#btree{fd=Fd}, Wrapper, Acc,
+                                     Options),
+    {ok, AccOut}.
 
 
 %% @doc fold the reduce function over the results.
