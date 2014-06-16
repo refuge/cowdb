@@ -338,7 +338,7 @@ log(Db, StartT, Fun, Acc) ->
 %% where TransactId is the transaction ID `Transactid' where the `OP'
 %% (`add' or `remove') on the Key/Value pair `{K, V}' has been run on
 %% the unix time `Ts'.</li>
-%% <li>`Acc': initial value to pass to the function.
+%% <li>`Acc': initial value to pass to the function.</li>
 %% </ul>
 %% The function return the total number of transactions in the range and
 %% the values collected during folding.

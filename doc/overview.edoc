@@ -2,41 +2,14 @@ title cowdb - copy-on-write object database
 @author Benoit Chesneau <benoitc@refuge.io>
   [http://refuge.io/]
 @copyright 2014 Benoit Chesneau (Apache 2 License)
+@version 0.1
+@title cowdb - Pure Key/Value datbase for Erlang Applications
 
-@doc cowdb is an object database based on the Apache CouchDB btree.
+@doc cowdb is a Key/Value database for Erlang Applications written in
+full Erlang.
 
 
 The source code can be obtained from <a
 href="https://bitbucket.org/refugeio/cowdb">the bitbucket repo</a>.
 
-Included modules are:
-
-<dl>
-    <dt>{@link cowdb}</dt>
-    <dd>
-        Main module to use the database.
-    </dd>
-
-    <dt>{@link cowdb_file}</dt>
-    <dd>
-        File module used by the btree module. It manage all interactions
-with the filesystem.
-    </dd>
-
-    <dt>{@link cowdb_btree}</dt>
-    <dd>
-        Main module to write and query multiple btree in a file created
-with the cow_file module.
-    </dd>
-
-    <dt>{@link cowdb_stream}</dt>
-    <dd>
-        module to store a large binary (stream) in the database file and
-get the list of each chunk.
-    </dd>
-</dl>
-
-
-Example of usage:
-
-Coming...
+The main module to use is {@link cowdb}.
