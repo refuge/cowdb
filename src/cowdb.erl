@@ -69,6 +69,10 @@
 -type db() :: #db{} | pid().
 -export_type([db/0]).
 
+-type fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
+                         {end_key, term()} | {end_key_gt, term()} |
+                         {key_group_fun, fun()}].
+
 -type transact_fn() :: {module(), fun(), [any()]} |
                        {module(), fun()} |
                        fun().
@@ -226,10 +230,15 @@ lookup(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
         end, [], Results).
 
 %% @doc fold all objects form the dabase
+%% @doc fold all objects form the database with range options
+-spec fold(db(), fun(), any()) -> {ok, any(), any()} | {error, term()}.
 fold(DbPid, Fun, Acc) ->
     fold(DbPid, Fun, Acc, []).
 
 %% @doc fold all objects form the database with range options
+-spec fold(db(), fun(), any(), fold_options())
+    -> {ok, any(), any()}
+    | {error, term()}.
 fold(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     fold(Db, Fun, Acc, Options);
