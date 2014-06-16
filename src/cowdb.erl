@@ -301,7 +301,7 @@ transact(Ref, OPs, Timeout) ->
     cowdb_updater:transact(UpdaterPid, OPs, Timeout).
 
 %% @doc compact the database file
--spec compact(db()) -> {ok, pid()} | {error, term()}.
+-spec compact(db()) -> ok | {error, term()}.
 compact(Ref) ->
     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
     cowdb_updater:compact(UpdaterPid, []).
