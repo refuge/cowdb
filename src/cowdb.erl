@@ -72,6 +72,7 @@
 -type fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
                          {end_key, term()} | {end_key_gt, term()} |
                          {key_group_fun, fun()}].
+-export_type([fold_options/0]).
 
 -type transact_fn() :: {module(), fun(), [any()]} |
                        {module(), fun()} |
@@ -250,30 +251,17 @@ fold(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
 
 
 %% @doc fold the reduce function over the results.
-fold_reduce(DbPid, ReduceFun, Acc, Options) when is_pid(DbPid) ->
+fold_reduce(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
-    fold_reduce(Db, ReduceFun, Acc, Options);
-fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, ReduceFun0, Acc, Options) ->
-    ReduceFun = fun(reduce, KVs) ->
-            KVs1 = lists:fold(fun({K, {_, {Pos, _}, _}}, AccKVs) ->
-                {ok, Val} = cbt_file:pread_term(Fd, Pos),
-                [{K, Val} | AccKVs]
-            end, [], KVs),
-            Result = ReduceFun0(reduce, lists:reverse(KVs1)),
-            {0, Result};
-        (rereduce, Reds) ->
-            UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
-            Result = ReduceFun0(rereduce, UsrReds),
-            {0, Result}
+    fold_reduce(Db, Fun, Acc, Options);
+fold_reduce(#db{reduce_fun=nil}, _Fun, _Acc, _Options) ->
+    {error, undefined_reduce_fun};
+fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
+    WrapperFun = fun(GroupedKey, PartialReds, Acc0) ->
+            {_, _, Reds} = cbt_btree:final_reduce(IdBt, PartialReds),
+            Fun(GroupedKey, Reds, Acc0)
     end,
-
-    WrapperFun = fun({GroupedKey, _}, PartialReds, Acc0) ->
-            {_, Reds} = couch_btree:final_reduce(ReduceFun,
-                                                 PartialReds),
-            ReduceFun(GroupedKey, Reds, Acc0)
-    end,
-    couch_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc,
-                            Options).
+    cbt_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc, Options).
 
 %% @doc add one object to a store
 -spec put(db(), term(), any()) -> {ok, transact_id()} | {error, term()}.

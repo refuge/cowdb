@@ -70,7 +70,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     Compression = cbt_util:get_opt(compression, Options, ?DEFAULT_COMPRESSION),
     DefaultLess = fun(A, B) -> A < B end,
     Less = cbt_util:get_opt(less, Options, DefaultLess),
-    Reduce = by_id_reduce(Options),
+    {UsrReduce, Reduce} = by_id_reduce(Options),
 
     {ok, IdBt} = cbt_btree:open(IdP, Fd, [{compression, Compression},
                                           {less, Less},
@@ -93,6 +93,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
         fsync_options=FSyncOptions,
         auto_compact=AutoCompact,
         compact_limit=CompactLimit,
+        reduce_fun=UsrReduce,
         options=Options}.
 
 %% @doc test if the db file should be synchronized or not depending on the
@@ -172,7 +173,7 @@ delete_file(FilePath, Async) ->
 by_id_reduce(Options) ->
     case lists:keyfind(reduce, 1, Options) of
         false ->
-            fun (reduce, KVs) ->
+            {nil, fun (reduce, KVs) ->
                     Count = length(KVs),
                     Size = lists:sum([S || {_, {_, {_, S}, _, _}} <- KVs]),
                     {Count, Size};
@@ -180,9 +181,9 @@ by_id_reduce(Options) ->
                     Count = lists:sum([Count0 || {Count0, _} <- Reds]),
                     AccSize = lists:sum([Size || {_, Size} <- Reds]),
                     {Count, AccSize}
-            end;
+            end};
         {_, ReduceFun0} ->
-            fun(reduce, KVs) ->
+            {ReduceFun0, fun(reduce, KVs) ->
                     Count = length(KVs),
                     Size = lists:sum([S || {_, {_, {_, S}, _, _}} <- KVs]),
                     Result = ReduceFun0(reduce, KVs),
@@ -193,7 +194,7 @@ by_id_reduce(Options) ->
                     UsrReds = [UsrRedsList || {_, UsrRedsList} <- Reds],
                     Result = ReduceFun0(rereduce, UsrReds),
                     {Count, AccSize, Result}
-            end
+            end}
     end.
 
 

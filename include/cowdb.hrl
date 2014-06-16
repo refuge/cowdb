@@ -32,6 +32,7 @@
              fsync_options,
              auto_compact=true,
              compact_limit,
+             reduce_fun=nil,
              options}).
 
 
