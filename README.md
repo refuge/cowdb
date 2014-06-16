@@ -1,6 +1,10 @@
 #cowdb
 
-object database in pure Erlang.
+Cowdb implements an indexed, key/value storage engine. The primary index
+is an append-only btree implemented using CBT a btree library extracted
+from Apache CouchDB .
+
+CowdDB is released under the Apache License 2.
 
 ## Features
 
