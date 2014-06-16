@@ -4,17 +4,26 @@ object database in pure Erlang.
 
 ## Features
 
-- based on the Apache CouchDB btree
-- multiple store support
-- support transactions (add, remove operations on a 1 ore more store at once)
-- transaction function support: cowdbwill invoke database functions as part of transaction processing. Functions written for this purpose are called transaction functions.
+- Append-Only b-tree using COW
+- Read/Write can happen independently
+- Put/Get/Delete/Fold operations support transactions (add, remove
+  operations on a 1 ore more store at once) transaction functions:
+Transaction functions can atomically analyze and transform database
+values in a transaction. You can use them to ensure atomic
+read-modify-update processing, and integrity constraints.
+- Transaction log
+- Snapshotting support: You are able to take a snapshot of the database
+  at any time (until the database is compacted)
+- Destructive compaction to reclaim space in your database. The log
+  history is lost during the transaction.
+- Automatic compaction
 
-### Transaction functions:
 
-A transaction function must expect to be passed a database value as its first argument.
-This is to allow transaction function to issue queries etc. Other args can be given to it.
+## Documentation
 
-Additionally, a transaction function must return transaction operations. (other functions can be part of it).
+https://wiki.refuge.io/display/COWDB/CowDB+Documentation+Home
+
+main cowdb website on http://cowdb.org
 
 
 ## build
@@ -79,9 +88,10 @@ Example of usage:
                     {ok, {a, V}} = cowdb:get(Db, a),
                     [{add, d, V}] end}]).
     {ok, 3}
-    9> cowdb:lookup(Pid, [a, b, c, d]).                                                             [{ok,{a,1}},not_found,{ok,{c,2}},{ok,{d,1}}]
+    9> cowdb:lookup(Pid, [a, b, c, d]).
+    [{ok,{a,1}},not_found,{ok,{c,2}},{ok,{d,1}}]
     10> cowdb:fold(Pid, fun(Got, Acc) -> {ok, [Got | Acc]} end, []).
-    {ok,{[],[3]},[{d,1},{c,2},{a,1}]}
+    {ok,[{d,1},{c,2},{a,1}]}
 
 ## contribute
 
