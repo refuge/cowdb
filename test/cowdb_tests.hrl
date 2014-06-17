@@ -18,8 +18,7 @@
                 ".."]))).
 
 -define(TEMPDIR,
-    filename:join([
-            ?BUILDDIR, "test", "temp"])).
+    filename:join([?BUILDDIR, "test", "temp"])).
 
 -define(tempfile,
     fun() ->
@@ -28,9 +27,6 @@
         FileName = lists:flatten(io_lib:format("~p-~p.~p.~p", [N, A, B, C])),
         filename:join([?TEMPDIR, FileName])
     end).
-
-
-
 
 -define(tempdb,
     fun() ->

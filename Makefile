@@ -10,7 +10,7 @@ $(if $(ERLC),,$(warning "Warning: No Erlang found in your path, this will probab
 
 $(if $(ESCRIPT),,$(warning "Warning: No escript found in your path, this will probably not work"))
 
-.PHONY: deps doc
+.PHONY: deps doc test
 
 all: deps compile
 
@@ -25,7 +25,7 @@ deps:
 doc: dev
 	$(REBAR) -C rebar_dev.config doc skip_deps=true
 
-test:
+test: dev
 	$(REBAR) -C rebar_dev.config eunit skip_deps=true
 
 clean:
