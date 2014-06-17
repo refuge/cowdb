@@ -46,7 +46,7 @@ install it.
 
 Fetch the source code:
 
-    $ git clone git@bitbucket.org:refugeio/cowdb.git
+    $ git clone https://bitbucket.org/refugeio/cowdb.git
 
 Build the source, run the `make` command. It will fetch any needed
 dependencies.
@@ -54,14 +54,8 @@ dependencies.
     $ cd /<PATH_TO>/cowdb
     $ make
 
-### 3. test cowdb
 
-Run the following command line:
-
-    $ make test
-
-
-### 3. Build the doc
+### 2. Build the doc
 
     $ make doc
 
