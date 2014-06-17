@@ -58,6 +58,7 @@ basic_ops_test_() ->
                 fun should_add_remove/1,
                 fun should_add_with_transact_function/1,
                 fun should_query_with_transact_function/1,
+                fun should_count/1,
                 fun should_fold/1,
                 fun should_fold_rev/1,
                 fun should_stop_fold/1,
@@ -137,6 +138,15 @@ should_query_with_transact_function(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:transact(Db, [{fn, TransactFun}]),
     ?_assertMatch({ok, {d, 1}}, cowdb:get(Db, d)).
+
+should_count(Db)->
+    {ok, 1} = cowdb:transact(Db, [{add, a, 1},
+                                  {add, b, 2},
+                                  {add, c, 3},
+                                  {add, d, 4},
+                                  {add, e, 5}]),
+
+    ?_assertEqual({ok, 5}, cowdb:count(Db)).
 
 should_fold(Db) ->
     FoldFun = fun(KV, Acc) ->
