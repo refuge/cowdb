@@ -383,7 +383,7 @@ log(#db{tid=LastTid, reader_fd=Fd, log=LogBt}, StartT, EndT0, Fun, Acc) ->
     end,
 
     Wrapper = fun({_TransactId, #transaction{ops=Ops}}, Acc1) ->
-            fold_log_ops(Ops, Fd, Fun, Acc1)
+            fold_log_ops(lists:reverse(Ops), Fd, Fun, Acc1)
     end,
     {ok, {_, [Count]}, Result} = cbt_btree:fold(LogBt#btree{fd=Fd}, Wrapper,
                                                 Acc, [{start_key,  StartT},
