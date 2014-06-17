@@ -8,5 +8,5 @@ doc/*.html
 doc/*.css
 doc/erlang.png
 doc/edoc-info
-t/*.beam
-t/temp.*
+.eunit
+test/temp
