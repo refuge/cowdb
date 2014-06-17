@@ -19,7 +19,7 @@
 -export([open/1, open/2, open/3,
          open_link/1, open_link/2, open_link/3,
          close/1,
-         delete_db/1, delete_db/2,
+         drop_db/1, drop_db/2,
          db_info/1,
          count/1,
          data_size/1,
@@ -157,13 +157,13 @@ close(DbPid) ->
     end.
 
 %% @doc delete a database
--spec delete_db(db()) -> ok | {error, term()}.
-delete_db(DbPid) ->
-    delete_db(DbPid, false).
+-spec drop_db(db()) -> ok | {error, term()}.
+drop_db(DbPid) ->
+    drop_db(DbPid, false).
 
 %% @doc delete a database asynchronously or not
--spec delete_db(db(), boolean()) -> ok | {error, term()}.
-delete_db(DbPid, Async) ->
+-spec drop_db(db(), boolean()) -> ok | {error, term()}.
+drop_db(DbPid, Async) ->
     #db{file_path=FilePath}=gen_server:call(DbPid, get_db,
                                             infinity),
     ok = close(DbPid),

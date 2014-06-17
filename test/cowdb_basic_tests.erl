@@ -22,12 +22,12 @@ setup() ->
     Db.
 
 teardown(Db) ->
-    ok = cowdb:delete_db(Db).
+    ok = cowdb:drop_db(Db).
 
 open_close_test() ->
     {ok, Db} = cowdb:open(?tempfile()),
     ?assert(is_pid(Db)),
-    ?assertMatch(ok, cowdb:delete_db(Db)).
+    ?assertMatch(ok, cowdb:drop_db(Db)).
 
 db_info_test() ->
     FileName = ?tempfile(),
@@ -42,7 +42,7 @@ db_info_test() ->
                         {data_size,0},
                         {start_time, _},
                         {db_version,1}]}, cowdb:db_info(Db)),
-    ok = cowdb:delete_db(Db).
+    ok = cowdb:drop_db(Db).
 
 basic_ops_test_() ->
     {

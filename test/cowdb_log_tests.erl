@@ -22,7 +22,7 @@ setup() ->
     Db.
 
 teardown(Db) ->
-    ok = cowdb:delete_db(Db).
+    ok = cowdb:drop_db(Db).
 
 log_test_() ->
     {
@@ -56,7 +56,7 @@ snapshot_test() ->
     ?assertMatch([{ok, {a, 1}}, not_found, {ok, {c, 3}}, {ok, {d, 4}}],
                  cowdb:lookup(Db3, [a, b, c, d])),
 
-    ok = cowdb:delete_db(Db).
+    ok = cowdb:drop_db(Db).
 
 
 should_log_transactions(Db) ->

@@ -32,5 +32,5 @@ basic_compaction_test() ->
     DataSize2 = proplists:get_value(data_size, DbInfo2),
     ?assert(DiskSize2 < DiskSize0),
     ?assertEqual(DataSize2, DataSize0),
-    ok = cowdb:delete_db(Db).
+    ok = cowdb:drop_db(Db).
 

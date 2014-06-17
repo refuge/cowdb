@@ -4,7 +4,7 @@ Changelog of cowdb
 0.2.0 - 2014/06/17
 
 - add unittests
-- add cowdb:delete_db/1 to delete a database
+- add cowdb:drop_db/1 to delete a database
 - fix transaction function: now the error will be correctly returned to
   the caller. Also a transaction can be cleanly canceled from it.
 - fix: transaction log number when folding in a range
