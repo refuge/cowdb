@@ -99,6 +99,6 @@ Example of usage:
 
 ## contribute
 
-Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/COWDB
+Open Issues and Support tickets in [Jira](https://issues.refuge.io/browse/CDB
 ).
 Code is available on [bitbucket](https://bitbucket.org/refugeio/cowdb).
