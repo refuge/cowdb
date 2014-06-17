@@ -29,7 +29,9 @@ log_test_() ->
         "Test snapshotting and log features",
         ?foreach([
                 fun should_log_transactions/1,
-                fun should_fetch_log_in_range/1
+                fun should_fetch_log_in_range/1,
+                fun log_is_reset_after_compaction/1,
+                fun should_keep_last_transaction_id_after_compaction/1
         ])
     }.
 
@@ -88,3 +90,33 @@ should_fetch_log_in_range(Db) ->
                            {2, add, {b, 2}, _},
                            {1, add, {a, 1}, _}]},
                    cowdb:log(Db, 1, 2, LogFun, [])).
+
+log_is_reset_after_compaction(Db) ->
+    {ok, 1} = cowdb:put(Db, a, 1),
+    {ok, 2} = cowdb:transact(Db, [{add, b, 2},
+                                  {add, c, 3}]),
+    {ok, 3} = cowdb:transact(Db, [{remove, b},
+                                  {add, d, 4}]),
+
+    {ok, DbInfo0} = cowdb:db_info(Db),
+    TxCount0 = proplists:get_value(tx_count, DbInfo0),
+    ok = cowdb:compact(Db),
+    timer:sleep(1000),
+    {ok, DbInfo2} = cowdb:db_info(Db),
+    TxCount2 = proplists:get_value(tx_count, DbInfo2),
+    ?_assertEqual({4, 1}, {TxCount0, TxCount2}).
+
+should_keep_last_transaction_id_after_compaction(Db) ->
+    {ok, 1} = cowdb:put(Db, a, 1),
+    {ok, 2} = cowdb:transact(Db, [{add, b, 2},
+                                  {add, c, 3}]),
+    {ok, 3} = cowdb:transact(Db, [{remove, b},
+                                  {add, d, 4}]),
+
+    {ok, DbInfo0} = cowdb:db_info(Db),
+    TxEnd0 =  proplists:get_value(tx_end, DbInfo0),
+    ok = cowdb:compact(Db),
+    timer:sleep(1000),
+    {ok, DbInfo2} = cowdb:db_info(Db),
+    TxStart2 = proplists:get_value(tx_start, DbInfo2),
+    ?_assertEqual(TxEnd0, TxStart2).
