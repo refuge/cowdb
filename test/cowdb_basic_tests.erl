@@ -50,6 +50,7 @@ basic_ops_test_() ->
         ?foreach([
                 fun should_create_kv/1,
                 fun should_read_kv/1,
+                fun should_update_kv/1,
                 fun should_delete_kv/1,
                 fun should_lookup_kvs/1,
                 fun should_lookup_kvs_in_order/1,
@@ -75,6 +76,11 @@ should_create_kv(Db) ->
 should_read_kv(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     ?_assertMatch({ok, {a, 1}}, cowdb:get(Db, a)).
+
+should_update_kv(Db) ->
+    {ok, 1} = cowdb:put(Db, a, 1),
+    {ok, 2} = cowdb:put(Db, a, 2),
+    ?_assertMatch({ok, {a, 2}}, cowdb:get(Db, a)).
 
 should_delete_kv(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
