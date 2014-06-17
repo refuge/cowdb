@@ -46,7 +46,10 @@ basic_ops_test_() ->
                 fun should_fold/1,
                 fun should_fold_rev/1,
                 fun should_stop_fold/1,
-                fun should_fold_range/1
+                fun should_fold_range/1,
+                fun should_cancel_transact_fun/1,
+                fun should_error_transact_fun/1,
+                fun shoudl_catch_transact_fun_error/1
         ])
     }.
 
@@ -177,3 +180,24 @@ should_fold_range(Db) ->
                   cowdb:fold(Db, FoldFun, [], [{start_key, c},
                                                {end_key, d}])).
 
+
+should_cancel_transact_fun(Db) ->
+    TransactFun = fun(_Db1) ->
+           cancel
+    end,
+    Reply = cowdb:transact(Db,  [{fn, TransactFun}]),
+    ?_assertMatch({error, canceled}, Reply).
+
+should_error_transact_fun(Db) ->
+    TransactFun = fun(_Db1) ->
+        {error, conflict}
+    end,
+    Reply = cowdb:transact(Db,  [{fn, TransactFun}]),
+    ?_assertMatch({error, conflict}, Reply).
+
+shoudl_catch_transact_fun_error(Db) ->
+    TransactFun = fun(_Db1) ->
+            throw(badarg)
+    end,
+    Reply = cowdb:transact(Db,  [{fn, TransactFun}]),
+    ?_assertMatch(badarg, Reply).

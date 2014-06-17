@@ -321,8 +321,14 @@ run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, TransactId, Db) ->
     run_transaction(Rest, {ToAdd, [Key | ToRem]}, TransactId, Db);
 run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
     %% execute a transaction function
-    Ops = cowdb_util:apply(Func, [Db]),
-    run_transaction(Ops ++ Rest, AddRemove, TransactId, Db);
+    case cowdb_util:apply(Func, [Db]) of
+        {error, _Reason}=Error ->
+            Error;
+        cancel ->
+            {error, canceled};
+        Ops ->
+            run_transaction(Ops ++ Rest, AddRemove, TransactId, Db)
+    end;
 run_transaction(_, _, _, _) ->
     {error, unknown_op}.
 
