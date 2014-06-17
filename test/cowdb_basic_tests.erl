@@ -42,7 +42,11 @@ basic_ops_test_() ->
                 fun should_add_multiple_kvs/1,
                 fun should_add_remove/1,
                 fun should_add_with_transact_function/1,
-                fun should_query_with_transact_function/1
+                fun should_query_with_transact_function/1,
+                fun should_fold/1,
+                fun should_fold_rev/1,
+                fun should_stop_fold/1,
+                fun should_fold_range/1
         ])
     }.
 
@@ -115,3 +119,61 @@ should_query_with_transact_function(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:transact(Db, [{fn, TransactFun}]),
     ?_assertMatch({ok, {d, 1}}, cowdb:get(Db, d)).
+
+should_fold(Db) ->
+    FoldFun = fun(KV, Acc) ->
+            {ok, [KV |Acc]}
+    end,
+
+    {ok, 1} = cowdb:transact(Db, [{add, a, 1},
+                                  {add, b, 2},
+                                  {add, c, 3},
+                                  {add, d, 4},
+                                  {add, e, 5}]),
+    ?_assertMatch({ok, [{e, 5}, {d, 4}, {c, 3}, {b, 2}, {a, 1}]},
+                  cowdb:fold(Db, FoldFun, [])).
+
+should_fold_rev(Db) ->
+    FoldFun = fun(KV, Acc) ->
+            {ok, [KV |Acc]}
+    end,
+
+    {ok, 1} = cowdb:transact(Db, [{add, a, 1},
+                                  {add, b, 2},
+                                  {add, c, 3},
+                                  {add, d, 4},
+                                  {add, e, 5}]),
+
+    ?_assertMatch({ok, [{a, 1}, {b, 2}, {c, 3}, {d, 4}, {e, 5}]},
+                  cowdb:fold(Db, FoldFun, [], [{dir, rev}])).
+
+should_stop_fold(Db) ->
+    FoldFun = fun
+        ({d, _}, Acc) ->
+            {stop, Acc};
+        (KV, Acc) ->
+            {ok, [KV |Acc]}
+    end,
+
+    {ok, 1} = cowdb:transact(Db, [{add, a, 1},
+                                  {add, b, 2},
+                                  {add, c, 3},
+                                  {add, d, 4},
+                                  {add, e, 5}]),
+    ?_assertMatch({ok, [{c, 3}, {b, 2}, {a, 1}]},
+                  cowdb:fold(Db, FoldFun, [])).
+
+should_fold_range(Db) ->
+    FoldFun = fun(KV, Acc) ->
+            {ok, [KV |Acc]}
+    end,
+
+    {ok, 1} = cowdb:transact(Db, [{add, a, 1},
+                                  {add, b, 2},
+                                  {add, c, 3},
+                                  {add, d, 4},
+                                  {add, e, 5}]),
+    ?_assertMatch({ok, [{d, 4}, {c, 3}]},
+                  cowdb:fold(Db, FoldFun, [], [{start_key, c},
+                                               {end_key, d}])).
+
