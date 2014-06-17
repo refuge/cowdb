@@ -33,6 +33,30 @@ log_test_() ->
         ])
     }.
 
+
+snapshot_test() ->
+    {ok, Db} = cowdb:open(?tempfile()),
+    {ok, 1} = cowdb:put(Db, a, 1),
+    {ok, 2} = cowdb:transact(Db, [{add, b, 2},
+                                  {add, c, 3}]),
+    {ok, 3} = cowdb:transact(Db, [{remove, b},
+                                  {add, d, 4}]),
+
+    {ok, Db1} = cowdb:get_snapshot(Db, 1),
+    ?assertMatch([{ok, {a, 1}}, not_found, not_found, not_found],
+                 cowdb:lookup(Db1, [a, b, c, d])),
+
+    {ok, Db2} = cowdb:get_snapshot(Db, 2),
+    ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}, not_found],
+                 cowdb:lookup(Db2, [a, b, c, d])),
+
+    {ok, Db3} = cowdb:get_snapshot(Db, 3),
+    ?assertMatch([{ok, {a, 1}}, not_found, {ok, {c, 3}}, {ok, {d, 4}}],
+                 cowdb:lookup(Db3, [a, b, c, d])),
+
+    ok = cowdb:delete_db(Db).
+
+
 should_log_transactions(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:transact(Db, [{add, b, 2},
