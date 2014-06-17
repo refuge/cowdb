@@ -29,6 +29,21 @@ open_close_test() ->
     ?assert(is_pid(Db)),
     ?assertMatch(ok, cowdb:delete_db(Db)).
 
+db_info_test() ->
+    FileName = ?tempfile(),
+    {ok, Db} = cowdb:open(FileName),
+    ?assertMatch({ok,  [{file_path, FileName},
+                        {object_count,0},
+                        {tx_count,1},
+                        {tx_start,0},
+                        {tx_end,0},
+                        {compact_running,false},
+                        {disk_size,4138},
+                        {data_size,0},
+                        {start_time, _},
+                        {db_version,1}]}, cowdb:db_info(Db)),
+    ok = cowdb:delete_db(Db).
+
 basic_ops_test_() ->
     {
         "Test basic operations",
