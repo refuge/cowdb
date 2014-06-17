@@ -2,7 +2,7 @@ title cowdb - copy-on-write object database
 @author Benoit Chesneau <benoitc@refuge.io>
   [http://refuge.io/]
 @copyright 2014 Benoit Chesneau (Apache 2 License)
-@version 0.1.0
+@version 0.2.0
 @title cowdb - Pure Key/Value datbase for Erlang Applications
 
 @doc cowdb is a Key/Value database for Erlang Applications written in

@@ -62,8 +62,11 @@ dependencies.
 and open the `index.html` file in the doc folder. Or read it
 [online](http://refugeio.bitbucket.org/cowdb/index.html).
 
+### 3. Run tests
 
-Example of usage:
+    $ make test
+
+## Example of usage:
 
     1> {ok, Pid} = cowdb:open("testing.db").
     {ok,<0.35.0>}
