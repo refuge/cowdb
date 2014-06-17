@@ -9,7 +9,7 @@ Changelog of cowdb
   the caller. Also a transaction can be cleanly canceled from it.
 - fix: transaction log number when folding in a range
 - fix: transaction log order when folding
-- fix database close functon.
+- fix database close function.
 
 - 0.1.0 - 2014/06/17
 
