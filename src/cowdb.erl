@@ -447,6 +447,9 @@ init([FilePath, Options]) ->
     end.
 
 %% @private
+handle_call(close, _From, Db) ->
+    {stop, normal, ok, Db};
+
 handle_call(get_db, _From, Db) ->
     {reply, Db, Db};
 
