@@ -28,7 +28,8 @@ log_test_() ->
     {
         "Test snapshotting and log features",
         ?foreach([
-                fun should_log_transactions/1
+                fun should_log_transactions/1,
+                fun should_fetch_log_in_range/1
         ])
     }.
 
@@ -48,3 +49,18 @@ should_log_transactions(Db) ->
                            {2, add, {b, 2}, _},
                            {1, add, {a, 1}, _}]},
                    cowdb:log(Db, 0, 3, LogFun, [])).
+
+should_fetch_log_in_range(Db) ->
+    {ok, 1} = cowdb:put(Db, a, 1),
+    {ok, 2} = cowdb:transact(Db, [{add, b, 2},
+                                  {add, c, 3}]),
+    {ok, 3} = cowdb:transact(Db, [{remove, b},
+                                  {add, d, 4}]),
+
+    LogFun = fun(Got, Acc) ->
+            {ok, [Got |Acc]}
+    end,
+    ?_assertMatch({ok, 3, [{2, add, {c, 3}, _},
+                           {2, add, {b, 2}, _},
+                           {1, add, {a, 1}, _}]},
+                   cowdb:log(Db, 1, 2, LogFun, [])).
