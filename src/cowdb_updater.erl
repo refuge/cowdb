@@ -236,8 +236,9 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
                             {ok, Ops} ->
                                 %% an init function can return an initial
                                 %% transaction.
+                                Ts = cowdb_util:timestamp(),
                                 run_transaction(Ops, {[], []}, TransactId,
-                                                Db);
+                                                Ts, Db);
                             Error ->
                                 Error
                         end
@@ -251,8 +252,9 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
     TransactPid = spawn(fun() ->
                     %% execute the transaction
                     Resp = do_transaction(fun() ->
-                                    run_transaction(OPs, {[], []},
-                                                    TransactId, Db)
+                                    Ts = cowdb_util:timestamp(),
+                                    run_transaction(OPs, {[], []}, TransactId,
+                                                    Ts, Db)
                             end, TransactId),
 
                     UpdaterPid ! {TransactId, {done, Resp}}
@@ -283,7 +285,7 @@ rollback_transaction(#db{fd=Fd, header=Header}) ->
     ok= cbt_file:sync(Fd),
     ok.
 
-run_transaction([], {ToAdd, ToRem}, TransactId,
+run_transaction([], {ToAdd, ToRem}, TransactId, Ts0,
                 #db{by_id=IdBt, log=LogBt}=Db) ->
     %% we atomically store the transaction.
     {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
@@ -304,21 +306,21 @@ run_transaction([], {ToAdd, ToRem}, TransactId,
     Transaction = {TransactId, #transaction{tid=TransactId,
                                             by_id=cbt_btree:get_state(IdBt2),
                                             ops=Ops,
-                                            ts=cowdb_util:timestamp()}},
+                                            ts=Ts0}},
     {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
 run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, TransactId,
-                #db{fd=Fd}=Db) ->
+                Ts, #db{fd=Fd}=Db) ->
     %% we are storing the value directly in the file, the btrees will
     %% only keep a reference so we don't have the value multiple time.
     {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
-    Ts = cowdb_util:timestamp(),
     Value1 =  {Key, {Pos, Size}, TransactId, Ts},
-    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem}, TransactId, Db);
-run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, TransactId, Db) ->
+    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem}, TransactId,
+                    Ts, Db);
+run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, TransactId, Ts, Db) ->
     %% remove a key
-    run_transaction(Rest, {ToAdd, [Key | ToRem]}, TransactId, Db);
-run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
+    run_transaction(Rest, {ToAdd, [Key | ToRem]}, TransactId, Ts, Db);
+run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Ts, Db) ->
     %% execute a transaction function
     case cowdb_util:apply(Func, [Db]) of
         {error, _Reason}=Error ->
@@ -326,9 +328,9 @@ run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
         cancel ->
             {error, canceled};
         Ops ->
-            run_transaction(Ops ++ Rest, AddRemove, TransactId, Db)
+            run_transaction(Ops ++ Rest, AddRemove, TransactId, Ts, Db)
     end;
-run_transaction(_, _, _, _) ->
+run_transaction(_, _, _, _, _) ->
     {error, unknown_op}.
 
 %% execute transactoin
