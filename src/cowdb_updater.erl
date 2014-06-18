@@ -92,8 +92,7 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
             {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
                                                           Options, Db) of
                 {ok, Db1} ->
-                    ok = gen_server:call(DbPid, {db_updated, Db1},
-                                         infinity),
+                    gen_server:cast(DbPid, {db_updated, Db1}),
                     {{ok, TransactId}, Db1};
                 Error ->
                     {Error, Db}
