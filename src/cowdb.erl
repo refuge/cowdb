@@ -478,6 +478,9 @@ handle_call(_Msg, _From, State) ->
     {noreply, State}.
 
 %% @private
+handle_cast({db_updated, Db}, _State) ->
+    {noreply, Db};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

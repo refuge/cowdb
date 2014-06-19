@@ -92,8 +92,7 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
             {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
                                                           Options, Db) of
                 {ok, Db1} ->
-                    ok = gen_server:call(DbPid, {db_updated, Db1},
-                                         infinity),
+                    gen_server:cast(DbPid, {db_updated, Db1}),
                     {{ok, TransactId}, Db1};
                 Error ->
                     {Error, Db}
@@ -237,8 +236,9 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
                             {ok, Ops} ->
                                 %% an init function can return an initial
                                 %% transaction.
-                                run_transaction(Ops, {[], []}, TransactId,
-                                                Db);
+                                Ts = cowdb_util:timestamp(),
+                                run_transaction(Ops, {[], []}, [], TransactId,
+                                                Ts, Db);
                             Error ->
                                 Error
                         end
@@ -252,8 +252,9 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
     TransactPid = spawn(fun() ->
                     %% execute the transaction
                     Resp = do_transaction(fun() ->
-                                    run_transaction(OPs, {[], []},
-                                                    TransactId, Db)
+                                    Ts = cowdb_util:timestamp(),
+                                    run_transaction(OPs, {[], []}, [],
+                                                    TransactId, Ts, Db)
                             end, TransactId),
 
                     UpdaterPid ! {TransactId, {done, Resp}}
@@ -284,42 +285,49 @@ rollback_transaction(#db{fd=Fd, header=Header}) ->
     ok= cbt_file:sync(Fd),
     ok.
 
-run_transaction([], {ToAdd, ToRem}, TransactId,
+run_transaction([], {ToAdd, ToRem}, Log0, TransactId, Ts,
                 #db{by_id=IdBt, log=LogBt}=Db) ->
     %% we atomically store the transaction.
     {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
 
+    RemValues = [{RemKey, {RemKey, RemPointer, TransactId, Ts}}
+                 || {ok, {_, {RemKey, RemPointer, _, _}}} <- Found],
 
     %% reconstruct transactions operations for the log
-    Ops0 = lists:foldl(fun({_K, V}, Acc) ->
-                    [{add, V} | Acc]
-            end, [], ToAdd),
-    Ops = lists:reverse(lists:foldl(fun
-                    ({ok, {_K, {Key, Pointer, _, Ts}}}, Acc) ->
-                        V1 = {Key, Pointer, TransactId, Ts},
-                        [{remove, V1} | Acc];
-                    ({not_found, _}, Acc) ->
-                        Acc
-                end, Ops0, Found)),
+    %% this currently very inneficient and there is probably a better
+    %% way to do it.
+    Log = lists:foldl(fun
+                ({add, _}=Entry, Acc) ->
+                    [Entry | Acc];
+                ({remove, RemKey}, Acc) ->
+                    case lists:keyfind(RemKey, 1, RemValues) of
+                        {_K, Val} ->
+                            [{remove, Val} |Acc];
+                        _ ->
+                            Acc
+                    end
+            end, [], Log0),
+
     %% store the new log
     Transaction = {TransactId, #transaction{tid=TransactId,
                                             by_id=cbt_btree:get_state(IdBt2),
-                                            ops=Ops,
-                                            ts=cowdb_util:timestamp()}},
+                                            ops=lists:reverse(Log),
+                                            ts=Ts}},
     {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
-run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, TransactId,
-                #db{fd=Fd}=Db) ->
+run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, Log, TransactId,
+                Ts, #db{fd=Fd}=Db) ->
     %% we are storing the value directly in the file, the btrees will
     %% only keep a reference so we don't have the value multiple time.
     {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
-    Ts = cowdb_util:timestamp(),
     Value1 =  {Key, {Pos, Size}, TransactId, Ts},
-    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem}, TransactId, Db);
-run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, TransactId, Db) ->
+    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem},
+                    [{add, Value1} | Log],  TransactId, Ts, Db);
+run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, Log, TransactId, Ts, Db) ->
     %% remove a key
-    run_transaction(Rest, {ToAdd, [Key | ToRem]}, TransactId, Db);
-run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
+    run_transaction(Rest, {ToAdd, [Key | ToRem]}, [{remove, Key} | Log],
+                    TransactId, Ts, Db);
+run_transaction([{fn, Func} | Rest], AddRemove, Log, TransactId, Ts, Db) ->
     %% execute a transaction function
     case cowdb_util:apply(Func, [Db]) of
         {error, _Reason}=Error ->
@@ -327,9 +335,9 @@ run_transaction([{fn, Func} | Rest], AddRemove, TransactId, Db) ->
         cancel ->
             {error, canceled};
         Ops ->
-            run_transaction(Ops ++ Rest, AddRemove, TransactId, Db)
+            run_transaction(Ops ++ Rest, AddRemove, Log, TransactId, Ts, Db)
     end;
-run_transaction(_, _, _, _) ->
+run_transaction(_, _, _, _, _, _) ->
     {error, unknown_op}.
 
 %% execute transactoin
