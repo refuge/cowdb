@@ -17,7 +17,7 @@
 -export([transact/3]).
 -export([compact/2, cancel_compact/1]).
 -export([get_db/1]).
--export([call/3, call/4]).
+-export([req/2]).
 
 
 %% proc lib export
@@ -41,24 +41,17 @@ start_link(DbPid, Fd, ReaderFd, FilePath, Options) ->
 %% @doc get latest db state.
 -spec get_db(pid()) -> cowdb:db().
 get_db(Pid) ->
-    do_call(Pid, get_db, [], infinity).
+    req(Pid, get_db).
 
 %% @doc send a transaction and wait for its result.
 transact(UpdaterPid, Ops, Timeout) ->
-    do_call(UpdaterPid, transact, {Ops, Timeout}, infinity).
-
+    req(UpdaterPid, {transact, Ops, Timeout}).
 
 compact(UpdaterPid, Options) ->
-    do_call(UpdaterPid, start_compact, Options, infinity).
+    req(UpdaterPid, {start_compact, Options}).
 
 cancel_compact(UpdaterPid) ->
-    do_call(UpdaterPid, cancel_compact, [], infinity).
-
-call(UpdaterPid, Label, Args) ->
-    call(UpdaterPid, Label, Args, infinity).
-
-call(UpdaterPid, Label, Args, Timeout) ->
-    do_call(UpdaterPid, Label, Args, Timeout).
+    req(UpdaterPid, cancel_compact).
 
 
 init(DbPid, Fd, ReaderFd, FilePath, Options) ->
@@ -76,7 +69,7 @@ init(DbPid, Fd, ReaderFd, FilePath, Options) ->
                           Options) of
         {ok, Db} ->
             proc_lib:init_ack({ok, self()}),
-            loop(Db);
+            updater_loop(Db);
         Error ->
             error_logger:info_msg("error initialising the database ~p: ~p",
                                    [FilePath, Error]),
@@ -84,10 +77,50 @@ init(DbPid, Fd, ReaderFd, FilePath, Options) ->
     end.
 
 
-loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
-         file_path=Path}=Db) ->
+
+updater_loop(Db) ->
     receive
-        {?MODULE, transact, {Tag, Client}, {OPs, Options}} ->
+        ?COWDB_CALL(From, Req) ->
+            do_apply_op(Req, From, Db);
+        Msg ->
+            error_logger:format("** cowdb_updater: unexpected message"
+                                "(ignored): ~w~n", [Msg]),
+            updater_loop(Db)
+    end.
+
+do_apply_op(Req, From, Db) ->
+    try apply_op(Req, From, Db) of
+        ok ->
+            updater_loop(Db);
+        Db2 when is_record(Db2, db) ->
+            updater_loop(Db2);
+        {more, Req1, From1, Db1} ->
+            do_apply_op(Req1, From1, Db1)
+    catch
+        exit:normal ->
+            exit(normal);
+        _:Error ->
+            FilePath = Db#db.file_path,
+            error_logger:format
+                      ("** cowdb: Bug was found when accessing database ~w~n",
+                       [FilePath]),
+            if
+                From =/= self() ->
+                    From ! {self(), {error, {cowdb_bug, FilePath, Req, Error}}},
+                    ok;
+                true -> % auto_save | may_grow | {delayed_write, _}
+                    ok
+            end,
+            updater_loop(Db)
+    end.
+
+
+
+apply_op(Req, From, Db) ->
+    #db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo}=Db,
+
+    case Req of
+        {transact, OPs, Options} ->
             TransactId = LastTid + 1,
             {Reply, Db2} = case catch handle_transaction(TransactId, OPs,
                                                           Options, Db) of
@@ -99,51 +132,47 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
             end,
 
             %% send the reply to the client
-            Client ! {Tag, Reply},
+            From ! {self(), Reply},
 
             %% check if we need to compact, if true it will trigger a
             %% background_compact message.
             case maybe_compact(Db2) of
                 true ->
-                    self() ! {?MODULE, background_compact};
+                    {more, background_compact, self(), Db2};
                 false ->
-                    ok
-            end,
-            loop(Db2);
-        {?MODULE, background_compact} ->
-            Db2 = case Db#db.compactor_info of
+                    Db2
+            end;
+        background_compact ->
+            case Db#db.compactor_info of
                 nil ->
                     Pid = spawn_link(fun() ->
                                     cowdb_compaction:start(Db, [])
                             end),
                     Db1 = Db#db{compactor_info=Pid},
-                    ok = gen_server:call(DbPid, {db_updated, Db1},
-                                         infinity),
+                    ok = gen_server:cast(DbPid, {db_updated, Db1}),
                     Db1;
                 _ ->
-                    Db
-            end,
-            loop(Db2);
-        {?MODULE, start_compact, {Tag, Client}, Options} ->
+                    ok
+            end;
+        {start_compact, Options} ->
             case Db#db.compactor_info of
                 nil ->
                     Pid = spawn_link(fun() ->
                                     cowdb_compaction:start(Db, Options)
                             end),
                     Db2 = Db#db{compactor_info=Pid},
-                    ok = gen_server:call(DbPid, {db_updated, Db2},
-                                         infinity),
-                    Client ! {Tag, ok},
-                    loop(Db2);
+                    ok = gen_server:cast(DbPid, {db_updated, Db2}),
+                    From ! {self(), ok},
+                    Db2;
                 _CompactorPid ->
-                    Client ! {Tag, ok},
-                    loop(Db)
+                    From ! {self, ok},
+                    ok
             end;
-        {?MODULE, compact_done, {_Tag, _Client}, _CompactFile}
+        {compact_done, _CompactFile}
                 when CompactInfo =:= nil ->
             %% the compactor already exited
-            loop(Db);
-        {?MODULE, compact_done, {Tag, Client}, CompactFile} ->
+            ok;
+        {compact_done, CompactFile} ->
             #db{fd=Fd, reader_fd=ReaderFd, file_path=FilePath}=Db,
             {ok, NewFd} = cbt_file:open(CompactFile),
             {ok, NewReaderFd} = cbt_file:open(CompactFile, [read_only]),
@@ -180,14 +209,15 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
                     cowdb_util:delete_file(OldFilePath),
 
                     %% tell the compactor it can close.
-                    Client ! {Tag, ok},
-                    loop(NewDb);
+                    From ! {self(), ok},
+                    NewDb;
                 false ->
                     cbt_file:close(NewFd),
                     cbt_file:close(NewReaderFd),
-                    Client ! {Tag, {retry, Db}}
+                    From ! {self(), {retry, Db}},
+                    Db
             end;
-        {?MODULE, cancel_compact, {Tag, Client}, []} ->
+        cancel_compact ->
             Db2 = case Db#db.compactor_info of
                 nil ->
                     Db;
@@ -196,15 +226,11 @@ loop(#db{tid=LastTid, db_pid=DbPid, compactor_info=CompactInfo,
                     cowdb_compaction:delete_compact_file(Db),
                     Db#db{compactor_info=nil}
             end,
-            Client ! {Tag, ok},
-            loop(Db2);
-        {?MODULE, get_db, {Tag, Client}, []} ->
-            Client ! {Tag, {ok, Db}},
-            loop(Db);
-        Msg ->
-            error_logger:error_msg(
-                "cow updater of ~p received unexpected message ~p~n",
-                [Path, Msg])
+            From ! {self(), ok},
+            Db2;
+        get_db ->
+            From ! {self(), {ok, Db}},
+            ok
     end.
 
 
@@ -357,23 +383,17 @@ do_transaction(Fun, TransactId) ->
 call_init(Fun, OldTransactId, NewTransactId, Db) ->
     cowdb_util:apply(Fun, [Db, OldTransactId, NewTransactId]).
 
-do_call(UpdaterPid, Label, Request, Timeout) ->
-    Tag = erlang:monitor(process, UpdaterPid),
-    catch erlang:send(UpdaterPid, {?MODULE, Label, {Tag, self()}, Request},
-                      [noconnect]),
-    receive
-        {Tag, Reply} ->
-            erlang:demonitor(Tag, [flush]),
-            Reply;
-        {'DOWN', Tag, _, _, noconnection} ->
-			exit({nodedown, node(UpdaterPid)});
-		{'DOWN', Tag, _, _, Reason} ->
-			exit(Reason)
-    after Timeout ->
-            erlang:demonitor(Tag, [flush]),
-            exit(timeout)
-    end.
 
+req(Proc, R) ->
+    Ref = erlang:monitor(process, Proc),
+    Proc ! ?COWDB_CALL(self(), R),
+    receive
+        {'DOWN', Ref, process, Proc, _Info} ->
+            badarg;
+        {Proc, Reply} ->
+            erlang:demonitor(Ref, [flush]),
+            Reply
+    end.
 
 maybe_compact(#db{auto_compact=false}) ->
     false;

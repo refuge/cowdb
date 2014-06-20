@@ -42,7 +42,7 @@ start(#db{updater_pid=UpdaterPid}=Db, Options) ->
             do_compact(Db, TargetDb, false)
     end,
     close_db(NewDb),
-    case cowdb_updater:call(UpdaterPid, compact_done, CompactFile) of
+    case cowdb_updater:req(UpdaterPid, {compact_done, CompactFile}) of
         ok -> ok;
         {retry, CurrentDb} ->
             start(CurrentDb, Options)

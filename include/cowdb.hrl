@@ -13,6 +13,8 @@
 
 -define(DISK_VERSION, 1).
 
+-define(COWDB_CALL(Pid, Req), {'$cowdb_call', Pid, Req}).
+
 -record(db_header, {version=?DISK_VERSION,
                     tid=-1,
                     by_id=nil,
