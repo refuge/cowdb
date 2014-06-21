@@ -164,8 +164,7 @@ drop_db(DbPid) ->
 %% @doc delete a database asynchronously or not
 -spec drop_db(db(), boolean()) -> ok | {error, term()}.
 drop_db(DbPid, Async) ->
-    #db{file_path=FilePath}=gen_server:call(DbPid, get_db,
-                                            infinity),
+    #db{file_path=FilePath}=gen_server:call(DbPid, get_db, infinity),
     ok = close(DbPid),
     cowdb_util:delete_file(FilePath, Async).
 
@@ -426,31 +425,15 @@ get_snapshot(#db{log=LogBt, reader_fd=Fd, by_id=IdBt}=Db, TransactId) ->
 
 %% @private
 init([FilePath, Options]) ->
-     %% set openoptions
-    OpenOptions = case proplists:get_value(override, Options, false) of
-        true -> [create_if_missing, override];
-        false -> [create_if_missing]
-    end,
-
-    case cbt_file:open(FilePath, OpenOptions) of
-        {ok, Fd} ->
-            %% open the the reader file
-            {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
-
-            %% initialise the db updater process
-            {ok, UpdaterPid} = cowdb_updater:start_link(self(), Fd, ReaderFd,
-                                                        FilePath, Options),
-            {ok, Db} = cowdb_updater:get_db(UpdaterPid),
-            process_flag(trap_exit, true),
-            {ok, Db};
+    process_flag(trap_exit, true),
+    case cowdb_updater:start_link(FilePath, Options, self()) of
+        {ok, UpdaterPid} ->
+            cowdb_updater:get_db(UpdaterPid);
         Error ->
             Error
     end.
 
 %% @private
-handle_call(close, _From, Db) ->
-    {stop, normal, ok, Db};
-
 handle_call(get_db, _From, Db) ->
     {reply, Db, Db};
 
@@ -458,21 +441,8 @@ handle_call(get_updater, _From, #db{updater_pid=UpdaterPid}=Db) ->
     {reply, UpdaterPid, Db};
 
 
-handle_call({db_updated, #db{fd=Fd, reader_fd=ReaderFd}=Db}, _From,
-            #db{fd=Fd, reader_fd=ReaderFd}) ->
-    {reply, ok, Db};
-
-handle_call({db_updated, #db{fd=Fd, reader_fd=ReaderFd}=Db}, _From,
-            #db{fd=OldFd, reader_fd=OldReaderFd}) ->
-
-    %% unlink old fds
-    unlink(OldFd),
-    unlink(OldReaderFd),
-    %% link new fds
-    link(Fd),
-    link(ReaderFd),
-
-    {reply, ok, Db};
+handle_call(close, _From, #db{updater_pid=UpdaterPid}=Db) ->
+    {stop, normal, cowdb_updater:close(UpdaterPid), Db};
 
 handle_call(_Msg, _From, State) ->
     {noreply, State}.
@@ -485,8 +455,6 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'EXIT', _, normal}, Db) ->
-    {noreply, Db};
 handle_info({'EXIT', _, Reason}, Db) ->
     {stop, Reason, Db};
 handle_info(_Info, State) ->
@@ -497,10 +465,5 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %% @private
-terminate(_Reason, #db{updater_pid=UpdaterPid, fd=Fd, reader_fd=ReaderFd}) ->
-    %% close the updater pid
-    ok = cowdb_util:shutdown_sync(UpdaterPid),
-    %% close file descriptors
-    ok = cbt_file:close(Fd),
-    ok = cbt_file:close(ReaderFd),
+terminate(_Reason, _State) ->
     ok.

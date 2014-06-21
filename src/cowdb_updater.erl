@@ -13,7 +13,8 @@
 -module(cowdb_updater).
 
 %% PUBLIC API
--export([start_link/5]).
+-export([start_link/3]).
+-export([close/1]).
 -export([transact/3]).
 -export([compact/2, cancel_compact/1]).
 -export([get_db/1]).
@@ -21,7 +22,7 @@
 
 
 %% proc lib export
--export([init/5]).
+-export([init/3]).
 
 %% compaction util export
 -export([init_db/6]).
@@ -33,9 +34,8 @@
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
 
-start_link(DbPid, Fd, ReaderFd, FilePath, Options) ->
-    proc_lib:start_link(?MODULE, init, [DbPid, Fd, ReaderFd, FilePath,
-                                        Options]).
+start_link(FilePath, Options, DbPid) ->
+    proc_lib:start_link(?MODULE, init, [FilePath, Options, DbPid]).
 
 
 %% @doc get latest db state.
@@ -54,19 +54,12 @@ cancel_compact(UpdaterPid) ->
     req(UpdaterPid, cancel_compact).
 
 
-init(DbPid, Fd, ReaderFd, FilePath, Options) ->
-    Header = case cbt_file:read_header(Fd) of
-        {ok, Header1, _Pos} ->
-            Header1;
-        no_valid_header ->
-            Header1 = #db_header{},
-            {ok, _} = cbt_file:write_header(Fd, Header1),
-            Header1
-    end,
+close(UpdaterPid) ->
+    req(UpdaterPid, close).
 
 
-    case catch init_db(Header, DbPid, Fd, ReaderFd, FilePath,
-                          Options) of
+init(FilePath, Options, DbPid) ->
+    case catch do_open_db(FilePath, Options, DbPid) of
         {ok, Db} ->
             proc_lib:init_ack({ok, self()}),
             updater_loop(Db);
@@ -76,12 +69,22 @@ init(DbPid, Fd, ReaderFd, FilePath, Options) ->
             proc_lib:init_ack(Error)
     end.
 
-
-
 updater_loop(Db) ->
     receive
         ?COWDB_CALL(From, Req) ->
             do_apply_op(Req, From, Db);
+        {'EXIT', Pid, Reason} when Pid =:= Db#db.db_pid ->
+            ok = do_stop(Db),
+            exit(Reason);
+        {'EXIT', Pid, Reason} when Pid =:= Db#db.fd ->
+            ok = do_stop(Db),
+            exit(Reason);
+        {'EXIT', Pid, Reason} when Pid =:= Db#db.reader_fd ->
+            ok = do_stop(Db),
+            exit(Reason);
+        {'EXIT', _Pid, normal}  ->
+            %% a compaction happened, old writer and reader are exiting.
+            updater_loop(Db);
         Msg ->
             error_logger:format("** cowdb_updater: unexpected message"
                                 "(ignored): ~w~n", [Msg]),
@@ -181,14 +184,12 @@ apply_op(Req, From, Db) ->
                                                       NewFd, NewReaderFd,
                                                       FilePath,
                                                       Db#db.options),
-            unlink(NewFd),
-            unlink(NewReaderFd),
+
             %% check if we need to relaunch the compaction or not.
             case Db#db.tid == Tid of
                 true ->
                     %% send to the db the new value
-                    ok = gen_server:call(DbPid, {db_updated, NewDb},
-                                         infinity),
+                    ok = gen_server:cast(DbPid, {db_updated, NewDb}),
 
                     %% we are now ready to switch the file
                     %% prevent write to the old file
@@ -230,11 +231,49 @@ apply_op(Req, From, Db) ->
             Db2;
         get_db ->
             From ! {self(), {ok, Db}},
-            ok
+            ok;
+        close ->
+            do_stop(Db),
+            From ! {self(), ok},
+            exit(normal)
+
     end.
 
+do_stop(#db{fd=Fd, reader_fd=ReaderFd}) ->
+    ok = cbt_file:close(Fd),
+    ok = cbt_file:close(ReaderFd),
+    ok.
 
 
+do_open_db(FilePath, Options, DbPid) ->
+    %% set openoptions
+    OpenOptions = case proplists:get_value(override, Options, false) of
+        true -> [create_if_missing, override];
+        false -> [create_if_missing]
+    end,
+
+
+    %% open the writer fd
+    case cbt_file:open(FilePath, OpenOptions) of
+        {ok, Fd} ->
+            %% open the the reader file
+            {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
+            process_flag(trap_exit, true),
+
+            %% open the header or initialize it.
+            Header = case cbt_file:read_header(Fd) of
+                {ok, Header1, _Pos} ->
+                    Header1;
+                no_valid_header ->
+                    Header1 = #db_header{},
+                    {ok, _} = cbt_file:write_header(Fd, Header1),
+                    Header1
+            end,
+            %% initialize the database.
+            init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options);
+        Error ->
+            Error
+    end.
 
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     Db = cowdb_util:init_db(Header, DbPid, Fd, ReaderFd, FilePath,
