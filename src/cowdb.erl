@@ -455,7 +455,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-handle_info({'EXIT', _, Reason}, Db) ->
+handle_info({'EXIT', Pid, Reason}, #db{updater_pid=Pid}=Db) ->
     {stop, Reason, Db};
 handle_info(_Info, State) ->
     {noreply, State}.
