@@ -4,7 +4,7 @@ Changelog of cowdb
 0.3.0 - 2014/06/21
 
 - bump cbt version to 1.1.2
-- optimise performances
+- optimize performances
 - fix transaction history: make sure that we keep the right order of the
   transaction
 - added a basho_bench driver
