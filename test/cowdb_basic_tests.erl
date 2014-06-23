@@ -50,12 +50,16 @@ basic_ops_test_() ->
         ?foreach([
                 fun should_create_kv/1,
                 fun should_read_kv/1,
+                fun should_create_kv_tuple/1,
+                fun should_read_kv_tuple/1,
                 fun should_update_kv/1,
                 fun should_delete_kv/1,
                 fun should_mget_kvs/1,
                 fun should_mget_kvs_in_order/1,
                 fun should_mget_not_found/1,
                 fun should_add_multiple_kvs/1,
+                fun should_put_multiple_kvs/1,
+                fun should_delete_multiple_keys/1,
                 fun should_add_remove/1,
                 fun should_add_with_transact_function/1,
                 fun should_query_with_transact_function/1,
@@ -75,6 +79,13 @@ should_create_kv(Db) ->
 
 should_read_kv(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
+    ?_assertMatch({ok, {a, 1}}, cowdb:get(Db, a)).
+
+should_create_kv_tuple(Db) ->
+    ?_assertMatch({ok, 1}, cowdb:put(Db, {a, 1})).
+
+should_read_kv_tuple(Db) ->
+    {ok, 1} = cowdb:put(Db, {a, 1}),
     ?_assertMatch({ok, {a, 1}}, cowdb:get(Db, a)).
 
 should_update_kv(Db) ->
@@ -113,6 +124,19 @@ should_add_multiple_kvs(Db) ->
     ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
                   cowdb:mget(Db, [a, b, c])).
 
+should_put_multiple_kvs(Db) ->
+    {ok, Tx} = cowdb:mput(Db,  [{a, 1}, {b, 2}, {c, 3}]),
+    ?assertEqual(1, Tx),
+    ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
+                  cowdb:mget(Db, [a, b, c])).
+
+should_delete_multiple_keys(Db) ->
+    {ok, 1} = cowdb:mput(Db,  [{a, 1}, {b, 2}, {c, 3}]),
+    ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
+                  cowdb:mget(Db, [a, b, c])),
+    {ok, 2} = cowdb:mdelete(Db, [a, b, c]),
+    ?_assertMatch([not_found, not_found, not_found],
+                  cowdb:mget(Db, [a, b, c])).
 
 should_add_remove(Db) ->
     {ok, Tx} = cowdb:transact(Db,  [{add, a, 1},

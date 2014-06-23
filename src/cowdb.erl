@@ -26,8 +26,10 @@
          get/2,
          mget/2,
          lookup/2,
-         put/3,
+         put/2, put/3,
+         mput/2,
          delete/2,
+         mdelete/2,
          fold/3, fold/4,
          full_reduce/1,
          fold_reduce/4,
@@ -295,15 +297,32 @@ fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
     end,
     cbt_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc, Options).
 
+
+%% @doc add one object to a store
+-spec put(db(), {term(), any()}) -> {ok, transact_id()} | {error, term()}.
+put(DbPid, {Key, Value}) ->
+    put(DbPid, Key, Value).
+
 %% @doc add one object to a store
 -spec put(db(), term(), any()) -> {ok, transact_id()} | {error, term()}.
 put(DbPid, Key, Value) ->
     transact(DbPid, [{add, Key, Value}]).
 
+
+%% @doc add multiple objects to a store
+-spec mput(db(), [{term(), any()}]) -> {ok, transact_id()} | {error, term()}.
+mput(Db, KVs) when is_list(KVs) ->
+    transact(Db, [{add, K, V} || {K, V} <- KVs]).
+
 %% @doc delete one object from the store
 -spec delete(db(), term()) -> {ok, transact_id()} | {error, term()}.
-delete(DbPid, Key) ->
-    transact(DbPid, [{remove, Key}]).
+delete(Db, Key) ->
+    transact(Db, [{remove, Key}]).
+
+%% @doc delete multiple object at once
+-spec mdelete(db(), [term()]) -> {ok, transact_id()} | {error, term()}.
+mdelete(Db, Keys) ->
+    transact(Db, [{remove, Key} || Key <- Keys]).
 
 
 %% @doc execute a transaction
