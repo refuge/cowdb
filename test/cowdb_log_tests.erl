@@ -98,11 +98,11 @@ log_is_reset_after_compaction(Db) ->
     {ok, 3} = cowdb:transact(Db, [{remove, b},
                                   {add, d, 4}]),
 
-    {ok, DbInfo0} = cowdb:db_info(Db),
+    {ok, DbInfo0} = cowdb:database_info(Db),
     TxCount0 = proplists:get_value(tx_count, DbInfo0),
     ok = cowdb:compact(Db),
     timer:sleep(1000),
-    {ok, DbInfo2} = cowdb:db_info(Db),
+    {ok, DbInfo2} = cowdb:database_info(Db),
     TxCount2 = proplists:get_value(tx_count, DbInfo2),
     ?_assertEqual({4, 1}, {TxCount0, TxCount2}).
 
@@ -113,10 +113,10 @@ should_keep_last_transaction_id_after_compaction(Db) ->
     {ok, 3} = cowdb:transact(Db, [{remove, b},
                                   {add, d, 4}]),
 
-    {ok, DbInfo0} = cowdb:db_info(Db),
+    {ok, DbInfo0} = cowdb:database_info(Db),
     TxEnd0 =  proplists:get_value(tx_end, DbInfo0),
     ok = cowdb:compact(Db),
     timer:sleep(1000),
-    {ok, DbInfo2} = cowdb:db_info(Db),
+    {ok, DbInfo2} = cowdb:database_info(Db),
     TxStart2 = proplists:get_value(tx_start, DbInfo2),
     ?_assertEqual(TxEnd0, TxStart2).

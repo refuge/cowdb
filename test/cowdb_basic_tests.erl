@@ -29,7 +29,7 @@ open_close_test() ->
     ?assert(is_pid(Db)),
     ?assertMatch(ok, cowdb:drop_db(Db)).
 
-db_info_test() ->
+database_info_test() ->
     FileName = ?tempfile(),
     {ok, Db} = cowdb:open(FileName),
     ?assertMatch({ok,  [{file_path, FileName},
@@ -41,7 +41,7 @@ db_info_test() ->
                         {disk_size,4138},
                         {data_size,0},
                         {start_time, _},
-                        {db_version,1}]}, cowdb:db_info(Db)),
+                        {db_version,1}]}, cowdb:database_info(Db)),
     ok = cowdb:drop_db(Db).
 
 basic_ops_test_() ->
