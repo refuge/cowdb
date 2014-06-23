@@ -115,7 +115,7 @@ open(Name, FilePath, Options) ->
     gen_server:start(Name, ?MODULE, [FilePath, Options],
                      [{spawn_opts, SpawnOpts}]).
 
-%% @doc open a cowdb databas as part of the supervision treee, pass a
+%% @doc open a cowdb database as part of the supervision tree, pass a
 %% function to initialise the stores and indexes.
 -spec open_link(FilePath::string()) ->
     {ok, Db::pid()}
@@ -135,7 +135,7 @@ open_link(FilePath, Options) ->
                           [{spawn_opts, SpawnOpts}]).
 
 %% @doc open a cowdb database as part of the supervision tree with a
-%% registerd name
+%% registered name
 - spec open_link(Name::mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
@@ -168,7 +168,7 @@ drop_db(DbPid, Async) ->
     ok = close(DbPid),
     cowdb_util:delete_file(FilePath, Async).
 
-%% @doc display database infos
+%% @doc returns database info
 -spec db_info(db()) -> {ok, list()}.
 db_info(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
@@ -223,13 +223,13 @@ data_size(#db{by_id=IdBt, log=LogBt}) ->
                            cbt_btree:size(LogBt)]),
     {ok, TotalSize}.
 
-%% @doc get an object from its key
+%% @doc get an object by the specified key
 -spec get(Db::db(), Key::any()) -> {ok, any()} | {error, term()}.
 get(Db, Key) ->
     [Val] = lookup(Db, [Key]),
     Val.
 
-%% @doc get a list of object from theyir key
+%% @doc get a list of objects by the specified key
 -spec lookup(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
 lookup(DbPid, Keys) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
@@ -309,9 +309,9 @@ delete(DbPid, Key) ->
 %% <li>`{add, Key, Value}' to add an object</li>
 %% <li>`{remove, Key}' to remove a value</li>
 %%<li> `{fn, Func}' a transaction function. A transaction function
-%%reveived the db value like it was at the beginning of the transaction
+%%received the db value like it was at the beginning of the transaction
 %%as an argument. It's possible to pass arguments to it. A transaction
-%%function return a list of operations and can wuery/maniuplate
+%%function return a list of operations and can query/manipulate
 %%function. The list of operations returned can also contain a
 %%function.</li>
 %%</ul>

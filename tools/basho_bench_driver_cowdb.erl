@@ -11,7 +11,7 @@ new(_Id) ->
     %% Make sure bitcask is available
     case code:which(cowdb) of
         non_existing ->
-            ?FAIL_MSG("~s requires hanoidb to be available on code path.\n",
+            ?FAIL_MSG("~s requires cowdb to be available on code path.\n",
                       [?MODULE]);
         _ ->
             ok
@@ -40,8 +40,8 @@ run(put, KeyGen, ValueGen, Db) ->
         Error ->
             Error
     end;
-run(delete, KeyGen, ValueGen, Db) ->
-    case cowdb:delete(Db, KeyGen(), ValueGen()) of
+run(delete, KeyGen, _ValueGen, Db) ->
+    case cowdb:delete(Db, KeyGen()) of
         {ok, _} ->
             {ok, Db};
         Error ->

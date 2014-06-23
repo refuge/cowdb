@@ -246,7 +246,7 @@ do_stop(#db{fd=Fd, reader_fd=ReaderFd}) ->
 
 
 do_open_db(FilePath, Options, DbPid) ->
-    %% set openoptions
+    %% set open options
     OpenOptions = case proplists:get_value(override, Options, false) of
         true -> [create_if_missing, override];
         false -> [create_if_missing]
@@ -295,7 +295,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
             {ok, Db};
         {_, InitFunc} ->
             TransactId = Tid + 1,
-            %% initialise the database with the init function.
+            %% initialize the database with the init function.
             do_transaction(fun() ->
                         case call_init(InitFunc, Tid, TransactId, Db) of
                             {ok, Ops} ->
@@ -325,7 +325,7 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
                     UpdaterPid ! {TransactId, {done, Resp}}
             end),
 
-    %% wait for its resilut
+    %% wait for the result
     receive
         {TransactId, {done, cancel}} ->
             rollback_transaction(Db),
@@ -341,9 +341,9 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
             {error, timeout}
     end.
 
-%% roll back t the latest root
-%% we don't try to edit in place instead we take the
-%% latest known header and append it to the database file
+%% rollback to the latest root
+%% we don't try to edit in-place, instead we take
+%% the latest known header and append it to the database file
 rollback_transaction(#db{fd=Fd, header=Header}) ->
     ok= cbt_file:sync(Fd),
     {ok, _Pos} = cbt_file:write_header(Fd, Header),
@@ -358,8 +358,8 @@ run_transaction([], {ToAdd, ToRem}, Log0, TransactId, Ts,
     RemValues = [{RemKey, {RemKey, RemPointer, TransactId, Ts}}
                  || {ok, {_, {RemKey, RemPointer, _, _}}} <- Found],
 
-    %% reconstruct transactions operations for the log
-    %% this currently very inneficient and there is probably a better
+    %% reconstruct transaction operations for the log.
+    %% currently, this is very inefficient and, probably,  there is better
     %% way to do it.
     Log = lists:foldl(fun
                 ({add, _}=Entry, Acc) ->
@@ -382,7 +382,7 @@ run_transaction([], {ToAdd, ToRem}, Log0, TransactId, Ts,
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
 run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, Log, TransactId,
                 Ts, #db{fd=Fd}=Db) ->
-    %% we are storing the value directly in the file, the btrees will
+    %% we are storing the value directly in the file, the btree will
     %% only keep a reference so we don't have the value multiple time.
     {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
     Value1 =  {Key, {Pos, Size}, TransactId, Ts},
@@ -405,7 +405,7 @@ run_transaction([{fn, Func} | Rest], AddRemove, Log, TransactId, Ts, Db) ->
 run_transaction(_, _, _, _, _, _) ->
     {error, unknown_op}.
 
-%% execute transactoin
+%% execute transaction
 do_transaction(Fun, TransactId) ->
     erlang:put(cowdb_trans, TransactId),
     try
