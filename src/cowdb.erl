@@ -20,7 +20,7 @@
          open_link/1, open_link/2, open_link/3,
          close/1,
          drop_db/1, drop_db/2,
-         db_info/1,
+         database_info/1,
          count/1,
          data_size/1,
          get/2,
@@ -166,11 +166,11 @@ drop_db(DbPid, Async) ->
     cowdb_util:delete_file(FilePath, Async).
 
 %% @doc returns database info
--spec db_info(db()) -> {ok, list()}.
-db_info(DbPid) when is_pid(DbPid) ->
+-spec database_info(db()) -> {ok, list()}.
+database_info(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
-    db_info(Db);
-db_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
+    database_info(Db);
+database_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
             compactor_info=Compactor, file_path=FilePath,
             header=#db_header{version=Version}}) ->
     {ok, _, StartT} = cbt_btree:fold(LogBt, fun({TransactId, _}, _) ->
