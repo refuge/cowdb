@@ -45,10 +45,6 @@
 -include("cowdb.hrl").
 -include_lib("cbt/include/cbt.hrl").
 
--type timeout() :: infinity | integer().
--export_type([timeout/0]).
-
-
 -type compression_method() :: snappy | lz4 | gzip
                               | {deflate, Level::integer()} | none.
 -type fsync_options() :: [before_header | after_header | on_file_open].
@@ -59,14 +55,14 @@
                          | {reduce, fun()}
                          | {less, fun()}
                          | {init_func, fun()}].
--type mfa() :: {local, Name::atom()}
+-type cow_mfa() :: {local, Name::atom()}
     | {global, GlobalName::term()}
     | {via, ViaName::term()}.
 
 -export_type([compression_method/0,
               fsync_options/0,
               open_options/0,
-              mfa/0]).
+              cow_mfa/0]).
 
 -type db() :: #db{} | pid().
 -export_type([db/0]).
@@ -107,7 +103,7 @@ open(FilePath, Options) ->
 
 
 %% @doc Create or open a cowdb store with a registered name.
-- spec open(Name::mfa(), FilePath::string(), Option::open_options()) ->
+- spec open(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(Name, FilePath, Options) ->
@@ -136,7 +132,7 @@ open_link(FilePath, Options) ->
 
 %% @doc open a cowdb database as part of the supervision tree with a
 %% registered name
-- spec open_link(Name::mfa(), FilePath::string(), Option::open_options()) ->
+- spec open_link(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 open_link(Name, FilePath, Options) ->
