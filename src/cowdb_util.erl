@@ -47,7 +47,7 @@ timestamp() ->
     (A * 1000000) + B.
 
 
-%% @doc initialise the db
+%% @doc initialize the db
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     DefaultFSyncOptions = [before_header, after_header, on_file_open],
     FSyncOptions = cbt_util:get_opt(fsync_options, Options,
@@ -60,13 +60,13 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     %% maybe sync the header
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
 
-    %% extract infos from the header
+    %% extract db info from the header
     #db_header{tid=Tid,
                by_id=IdP,
                log=LogP} = Header,
 
 
-    %% initialise the btrees
+    %% initialize the btree
     Compression = cbt_util:get_opt(compression, Options, ?DEFAULT_COMPRESSION),
     DefaultLess = fun(A, B) -> A < B end,
     Less = cbt_util:get_opt(less, Options, DefaultLess),
@@ -116,7 +116,7 @@ write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
     ok.
 
 
-%% @doc commit the transction on the disk.
+%% @doc commit the transaction on the disk.
 commit_transaction(TransactId, #db{by_id=IdBt,
                                    log=LogBt,
                                    header=OldHeader}=Db) ->
