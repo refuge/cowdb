@@ -24,6 +24,7 @@
          count/1,
          data_size/1,
          get/2,
+         mget/2,
          lookup/2,
          put/3,
          delete/2,
@@ -222,15 +223,21 @@ data_size(#db{by_id=IdBt, log=LogBt}) ->
 %% @doc get an object by the specified key
 -spec get(Db::db(), Key::any()) -> {ok, any()} | {error, term()}.
 get(Db, Key) ->
-    [Val] = lookup(Db, [Key]),
+    [Val] = mget(Db, [Key]),
     Val.
 
-%% @doc get a list of objects by the specified key
+%% @doc deprecated: use mget/2 instead.
 -spec lookup(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
-lookup(DbPid, Keys) when is_pid(DbPid) ->
+lookup(DbPid, Keys) ->
+    mget(DbPid, Keys).
+
+
+%% @doc get a list of objects by the specified key
+-spec mget(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
+mget(DbPid, Keys) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
-    lookup(Db, Keys);
-lookup(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
+    mget(Db, Keys);
+mget(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
     Results = cbt_btree:lookup(IdBt#btree{fd=Fd}, Keys),
     lists:foldr(fun
             ({ok, {Key, {_, {Pos, _}, _, _}}}, Acc) ->

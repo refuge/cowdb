@@ -52,9 +52,9 @@ basic_ops_test_() ->
                 fun should_read_kv/1,
                 fun should_update_kv/1,
                 fun should_delete_kv/1,
-                fun should_lookup_kvs/1,
-                fun should_lookup_kvs_in_order/1,
-                fun should_lookup_not_found/1,
+                fun should_mget_kvs/1,
+                fun should_mget_kvs_in_order/1,
+                fun should_mget_not_found/1,
                 fun should_add_multiple_kvs/1,
                 fun should_add_remove/1,
                 fun should_add_with_transact_function/1,
@@ -88,22 +88,22 @@ should_delete_kv(Db) ->
     ?assertMatch({ok, 2}, cowdb:delete(Db, a)),
     ?_assertMatch(not_found,  cowdb:get(Db, a)).
 
-should_lookup_kvs(Db) ->
+should_mget_kvs(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:put(Db, b, 2),
-    ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}], cowdb:lookup(Db, [a, b])).
+    ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}], cowdb:mget(Db, [a, b])).
 
-should_lookup_kvs_in_order(Db) ->
+should_mget_kvs_in_order(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:put(Db, b, 2),
-    ?_assertMatch([{ok, {b, 2}}, {ok, {a, 1}}], cowdb:lookup(Db, [b, a])).
+    ?_assertMatch([{ok, {b, 2}}, {ok, {a, 1}}], cowdb:mget(Db, [b, a])).
 
 
-should_lookup_not_found(Db) ->
+should_mget_not_found(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
     {ok, 2} = cowdb:put(Db, b, 2),
     ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, not_found],
-                  cowdb:lookup(Db, [a, b, c])).
+                  cowdb:mget(Db, [a, b, c])).
 
 should_add_multiple_kvs(Db) ->
     {ok, Tx} = cowdb:transact(Db,  [{add, a, 1},
@@ -111,19 +111,19 @@ should_add_multiple_kvs(Db) ->
                                     {add, c, 3}]),
     ?assertEqual(1, Tx),
     ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
-                  cowdb:lookup(Db, [a, b, c])).
+                  cowdb:mget(Db, [a, b, c])).
 
 
 should_add_remove(Db) ->
     {ok, Tx} = cowdb:transact(Db,  [{add, a, 1},
                                     {add, b, 2}]),
     ?assertEqual(1, Tx),
-    ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}], cowdb:lookup(Db, [a, b])),
+    ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}], cowdb:mget(Db, [a, b])),
     {ok, Tx2} = cowdb:transact(Db,  [{add, c, 3},
                                      {remove, b}]),
     ?assertEqual(2, Tx2),
     ?_assertMatch([{ok, {a, 1}}, not_found, {ok, {c, 3}}],
-                  cowdb:lookup(Db, [a, b, c])).
+                  cowdb:mget(Db, [a, b, c])).
 
 should_add_with_transact_function(Db) ->
     TransactFun = fun(_Db1) ->
@@ -134,7 +134,7 @@ should_add_with_transact_function(Db) ->
                                     {fn, TransactFun}]),
     ?assertEqual(1, Tx),
     ?_assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
-                  cowdb:lookup(Db, [a, b, c])).
+                  cowdb:mget(Db, [a, b, c])).
 
 should_query_with_transact_function(Db) ->
     TransactFun = fun(Db1) ->

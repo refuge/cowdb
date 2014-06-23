@@ -46,15 +46,15 @@ snapshot_test() ->
 
     {ok, Db1} = cowdb:get_snapshot(Db, 1),
     ?assertMatch([{ok, {a, 1}}, not_found, not_found, not_found],
-                 cowdb:lookup(Db1, [a, b, c, d])),
+                 cowdb:mget(Db1, [a, b, c, d])),
 
     {ok, Db2} = cowdb:get_snapshot(Db, 2),
     ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}, not_found],
-                 cowdb:lookup(Db2, [a, b, c, d])),
+                 cowdb:mget(Db2, [a, b, c, d])),
 
     {ok, Db3} = cowdb:get_snapshot(Db, 3),
     ?assertMatch([{ok, {a, 1}}, not_found, {ok, {c, 3}}, {ok, {d, 4}}],
-                 cowdb:lookup(Db3, [a, b, c, d])),
+                 cowdb:mget(Db3, [a, b, c, d])),
 
     ok = cowdb:drop_db(Db).
 
