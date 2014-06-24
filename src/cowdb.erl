@@ -106,7 +106,7 @@ open(FilePath, Options) ->
 
 
 %% @doc Create or open a cowdb store with a registered name.
-- spec open(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
+-spec open(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(Name, FilePath, Options) ->
@@ -135,7 +135,7 @@ open_link(FilePath, Options) ->
 
 %% @doc open a cowdb database as part of the supervision tree with a
 %% registered name
-- spec open_link(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
+-spec open_link(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
     {ok, Db::pid()}
     | {error, term()}.
 open_link(Name, FilePath, Options) ->
@@ -208,7 +208,7 @@ count(#db{by_id=IdBt}) ->
         {ok, {Count, _}} -> {ok, Count}
     end.
 
-%% @doc get the number of objects stored in the database.
+%% @doc get the total size of the objects stored in the database.
 -spec data_size(db()) -> {ok, integer()} | {error, term()}.
 data_size(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
