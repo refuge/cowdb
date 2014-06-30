@@ -1,6 +1,16 @@
 Changelog of cowdb
 ------------------
 
+0.4.0 - 2014/06/30
+
+- rename cowdb:db_info/1 to cowdb:database_info/1
+- rename cowdb:lookup/2 to cowdb:mget/2 . cowdb:lookup/2 is still there
+  but deprecated.
+- add cowdb:put/2: allows to pass a K/V tupple
+- add cowdb:mput/2: to send multiple PUT at once
+- add cowdb:mdelete/2: to send multiple delete at once
+- fix types and some typos
+
 0.3.0 - 2014/06/21
 
 - bump cbt version to 1.1.2
