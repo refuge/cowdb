@@ -13,7 +13,6 @@
 -module(cowdb_compaction).
 
 -include("cowdb.hrl").
--include_lib("cbt/include/cbt.hrl").
 
 -export([compact_path/1,
          delete_compact_file/1,
@@ -26,7 +25,7 @@ compact_path(#db{file_path=FilePath}) ->
 delete_compact_file(Db) ->
     CompactFile = compact_path(Db),
     RootDir = filename:dirname(CompactFile),
-    catch cbt_file:delete(RootDir, CompactFile).
+    catch cowdb_file:delete(RootDir, CompactFile).
 
 
 start(#db{updater_pid=UpdaterPid}=Db, Options) ->
@@ -62,12 +61,12 @@ do_compact(#db{tid=LastTid, by_id=IdBt, reader_fd=ReaderFd},
     %% copy the IDs btree to the new database
     CopyFun = fun({K, {_, {Pos, _}, Tid, Ts}}, Acc) ->
                    %% copy the value
-                   {ok, Val} = cbt_file:pread_term(ReaderFd, Pos),
-                   {ok, NewPos, Size} = cbt_file:append_term_crc32(Fd, Val),
+                   {ok, Val} = cowdb_file:pread_term(ReaderFd, Pos),
+                   {ok, NewPos, Size} = cowdb_file:append_term_crc32(Fd, Val),
 
                    {{K, {K, {NewPos, Size}, Tid, Ts}}, Acc}
     end,
-    {ok, IdRoot, _} = cbt_btree_copy:copy(IdBt#btree{fd=ReaderFd}, Fd,
+    {ok, IdRoot, _} = cowdb_btree_copy:copy(IdBt#btree{fd=ReaderFd}, Fd,
                                           [{before_kv_write, {CopyFun, nil}}]),
     IdBt2 = IdBt#btree{fd=Fd, root=IdRoot},
 
@@ -77,7 +76,7 @@ do_compact(#db{tid=LastTid, by_id=IdBt, reader_fd=ReaderFd},
                                          ops=[],
                                          ts =
                                          cowdb_util:timestamp()}},
-    {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
+    {ok, LogBt2} = cowdb_btree:add(LogBt, [Transaction]),
     %% finally commit the result to the file.
     TargetDb1 = TargetDb#db{by_id=IdBt2, log=LogBt2},
     {ok, TargetDb2} = cowdb_util:commit_transaction(LastTid, TargetDb1),
@@ -92,22 +91,22 @@ do_compact(#db{tid=LastTid, log=LogBt0, reader_fd=ReaderFd},
     CopyFun = fun({_TransactId, #transaction{ops=Ops}}, {IdBt1, Handled}) ->
             {ToAdd, ToRem, Handled2} =  copy_from_log(Ops, LastTid, ReaderFd,
                                                       Fd, [], [], Handled),
-            {ok, IdBt2} = cbt_btree:add_remove(IdBt1, ToAdd, ToRem),
+            {ok, IdBt2} = cowdb_btree:add_remove(IdBt1, ToAdd, ToRem),
             {ok, {IdBt2, Handled2}}
     end,
 
-    {ok, _, {FinalIdBt, _}} = cbt_btree:fold(LogBt0#btree{fd=ReaderFd},
+    {ok, _, {FinalIdBt, _}} = cowdb_btree:fold(LogBt0#btree{fd=ReaderFd},
                                              CopyFun, {IdBt, []},
                                              [rev, {start_key, LastTid},
                                               {end_key, Tid0}]),
 
     %% store a new transaction that point to this btree
     Transaction = {LastTid, #transaction{tid=LastTid,
-                                         by_id=cbt_btree:get_state(FinalIdBt),
+                                         by_id=cowdb_btree:get_state(FinalIdBt),
                                          ops=[],
                                          ts =
                                          cowdb_util:timestamp()}},
-    {ok, LogBt2} = cbt_btree:add(LogBt1, [Transaction]),
+    {ok, LogBt2} = cowdb_btree:add(LogBt1, [Transaction]),
 
     %% finally commit the result to the file.
     TargetDb1 = TargetDb#db{by_id=FinalIdBt, log=LogBt2},
@@ -126,8 +125,8 @@ copy_from_log([{Op, {Key, {Pos, _}, _, Ts}} | Rest], TransactId, ReaderFd,
         false ->
             case Op of
                 add ->
-                    {ok, Val} = cbt_file:pread_term(ReaderFd, Pos),
-                    {ok, NewPos, Size} = cbt_file:append_term_crc32(Fd, Val),
+                    {ok, Val} = cowdb_file:pread_term(ReaderFd, Pos),
+                    {ok, NewPos, Size} = cowdb_file:append_term_crc32(Fd, Val),
                     Add = {Key, {Key, {NewPos, Size}, TransactId, Ts}},
                     copy_from_log(Rest, TransactId, ReaderFd, Fd,
                                   [Add | ToAdd], ToRem, [Key | Handled]);
@@ -138,7 +137,7 @@ copy_from_log([{Op, {Key, {Pos, _}, _, Ts}} | Rest], TransactId, ReaderFd,
     end.
 
 close_db(#db{fd=Fd}) ->
-    cbt_file:close(Fd).
+    cowdb_file:close(Fd).
 
 init_db(Db, CompactFile, Header, Fd) ->
     NewDb = cowdb_util:init_db(Header, Db#db.db_pid, Fd, Fd, CompactFile,
@@ -147,17 +146,17 @@ init_db(Db, CompactFile, Header, Fd) ->
     NewDb.
 
 make_target_db(#db{tid=Tid}=Db, CompactFile) ->
-    case cbt_file:open(CompactFile) of
+    case cowdb_file:open(CompactFile) of
         {ok, Fd} ->
-            case cbt_file:read_header(Fd) of
+            case cowdb_file:read_header(Fd) of
                 {ok, Header, _Pos} ->
                     {ok, init_db(Db, CompactFile, Header, Fd)};
                 no_valid_header ->
                     {error, no_valid_header}
             end;
         {error, enoent} ->
-            {ok, Fd} = cbt_file:open(CompactFile, [create]),
+            {ok, Fd} = cowdb_file:open(CompactFile, [create]),
             Header = #db_header{tid=Tid},
-            {ok, _Pos} = cbt_file:write_header(Fd, Header),
+            {ok, _Pos} = cowdb_file:write_header(Fd, Header),
             {ok, init_db(Db, CompactFile, Header, Fd)}
     end.

@@ -46,7 +46,6 @@
 
 
 -include("cowdb.hrl").
--include_lib("cbt/include/cbt.hrl").
 
 -type compression_method() :: snappy | lz4 | gzip
                               | {deflate, Level::integer()} | none.
@@ -175,13 +174,13 @@ database_info(DbPid) when is_pid(DbPid) ->
 database_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
             compactor_info=Compactor, file_path=FilePath,
             header=#db_header{version=Version}}) ->
-    {ok, _, StartT} = cbt_btree:fold(LogBt, fun({TransactId, _}, _) ->
+    {ok, _, StartT} = cowdb_btree:fold(LogBt, fun({TransactId, _}, _) ->
                 {stop, TransactId}
         end, nil, []),
-    {ok, TxCount} = cbt_btree:full_reduce(LogBt),
-    {ok, DiskSize} = cbt_file:bytes(Fd),
+    {ok, TxCount} = cowdb_btree:full_reduce(LogBt),
+    {ok, DiskSize} = cowdb_file:bytes(Fd),
 
-    {ObjCount, DataSize} =  case cbt_btree:full_reduce(IdBt) of
+    {ObjCount, DataSize} =  case cowdb_btree:full_reduce(IdBt) of
         {ok, {Count, Size, _}} ->{Count, Size};
         {ok, {Count, Size}} -> {Count, Size}
     end,
@@ -203,7 +202,7 @@ count(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     count(Db);
 count(#db{by_id=IdBt}) ->
-    case cbt_btree:full_reduce(IdBt) of
+    case cowdb_btree:full_reduce(IdBt) of
         {ok, {Count, _, _}} -> {ok, Count};
         {ok, {Count, _}} -> {ok, Count}
     end.
@@ -214,12 +213,12 @@ data_size(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     data_size(Db);
 data_size(#db{by_id=IdBt, log=LogBt}) ->
-    VSize = case cbt_btree:full_reduce(IdBt) of
+    VSize = case cowdb_btree:full_reduce(IdBt) of
         {ok, {_, Size, _}} -> Size;
         {ok, {_, Size}} -> Size
     end,
-    TotalSize = lists:sum([VSize, cbt_btree:size(IdBt),
-                           cbt_btree:size(LogBt)]),
+    TotalSize = lists:sum([VSize, cowdb_btree:size(IdBt),
+                           cowdb_btree:size(LogBt)]),
     {ok, TotalSize}.
 
 %% @doc get an object by the specified key
@@ -240,10 +239,10 @@ mget(DbPid, Keys) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     mget(Db, Keys);
 mget(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
-    Results = cbt_btree:lookup(IdBt#btree{fd=Fd}, Keys),
+    Results = cowdb_btree:lookup(IdBt#btree{fd=Fd}, Keys),
     lists:foldr(fun
             ({ok, {Key, {_, {Pos, _}, _, _}}}, Acc) ->
-                {ok, Val} = cbt_file:pread_term(Fd, Pos),
+                {ok, Val} = cowdb_file:pread_term(Fd, Pos),
                 [{ok, {Key, Val}} | Acc];
             (Else, Acc) ->
                 [Else | Acc]
@@ -263,10 +262,10 @@ fold(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
     fold(Db, Fun, Acc, Options);
 fold(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
     Wrapper = fun({Key, {_, {Pos, _}, _, _}}, Acc1) ->
-            {ok, Val} = cbt_file:pread_term(Fd, Pos),
+            {ok, Val} = cowdb_file:pread_term(Fd, Pos),
             Fun({Key, Val}, Acc1)
     end,
-    {ok, _, AccOut} = cbt_btree:fold(IdBt#btree{fd=Fd}, Wrapper, Acc,
+    {ok, _, AccOut} = cowdb_btree:fold(IdBt#btree{fd=Fd}, Wrapper, Acc,
                                      Options),
     {ok, AccOut}.
 
@@ -277,7 +276,7 @@ full_reduce(DbPid) when is_pid(DbPid) ->
     Db = gen_server:call(DbPid, get_db, infinity),
     full_reduce(Db);
 full_reduce(#db{by_id=IdBt}) ->
-    case cbt_btree:full_reduce(IdBt) of
+    case cowdb_btree:full_reduce(IdBt) of
         {ok, {_, _}} ->
             {ok, []};
         {ok, {_, _, UsrRed}} ->
@@ -292,10 +291,10 @@ fold_reduce(#db{reduce_fun=nil}, _Fun, _Acc, _Options) ->
     {error, undefined_reduce_fun};
 fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
     WrapperFun = fun(GroupedKey, PartialReds, Acc0) ->
-            {_, _, Reds} = cbt_btree:final_reduce(IdBt, PartialReds),
+            {_, _, Reds} = cowdb_btree:final_reduce(IdBt, PartialReds),
             Fun(GroupedKey, Reds, Acc0)
     end,
-    cbt_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc, Options).
+    cowdb_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc, Options).
 
 
 %% @doc add one object to a store
@@ -407,9 +406,9 @@ log(#db{tid=LastTid, reader_fd=Fd, log=LogBt}, StartT, EndT0, Fun, Acc) ->
             fold_log_ops(lists:reverse(Ops), Fd, Fun, Acc1)
     end,
     LogBt2 = LogBt#btree{fd=Fd},
-    {ok, Reds, Result} = cbt_btree:fold(LogBt2, Wrapper, Acc,
+    {ok, Reds, Result} = cowdb_btree:fold(LogBt2, Wrapper, Acc,
                                         [{start_key, StartT}, {end_key, EndT}]),
-    Count = cbt_btree:final_reduce(LogBt2, Reds),
+    Count = cowdb_btree:final_reduce(LogBt2, Reds),
     {ok, Count, Result}.
 
 
@@ -417,7 +416,7 @@ log(#db{tid=LastTid, reader_fd=Fd, log=LogBt}, StartT, EndT0, Fun, Acc) ->
 fold_log_ops([], _Fd, _Fun, Acc) ->
     {ok, Acc};
 fold_log_ops([{Op, {Key, {Pos, _}, TransactId, Ts}} | Rest], Fd, Fun, Acc) ->
-    {ok, Val} = cbt_file:pread_term(Fd, Pos),
+    {ok, Val} = cowdb_file:pread_term(Fd, Pos),
     case Fun({TransactId, Op, {Key, Val}, Ts}, Acc) of
         {ok, Acc2} ->
             fold_log_ops(Rest, Fd, Fun, Acc2);
@@ -433,7 +432,7 @@ get_snapshot(DbPid, TransactId) when is_pid(DbPid) ->
 get_snapshot(#db{tid=Tid}=Db, tx_end)->
     get_snapshot(Db, Tid);
 get_snapshot(#db{log=LogBt, reader_fd=Fd, by_id=IdBt}=Db, TransactId) ->
-    case cbt_btree:lookup(LogBt#btree{fd=Fd}, [TransactId]) of
+    case cowdb_btree:lookup(LogBt#btree{fd=Fd}, [TransactId]) of
         [not_found] ->
             {error, not_found};
         [{ok, {_TransactId, #transaction{by_id=SnapshotRoot}}}] ->

@@ -10,6 +10,25 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
+-define(DEFAULT_COMPRESSION, none).
+
+-define(term_to_bin(T), term_to_binary(T, [{minor_version, 1}])).
+-define(term_size(T),
+    try
+        erlang:external_size(T)
+    catch _:_ ->
+        byte_size(?term_to_bin(T))
+    end).
+
+-record(btree, {fd,
+                root,
+                extract_kv = identity,  % fun({_Key, _Value} = KV) -> KV end,,
+                assemble_kv =  identity, % fun({Key, Value}) -> {Key, Value} end,
+                less = fun(A, B) -> A < B end,
+                reduce = nil,
+                compression = ?DEFAULT_COMPRESSION,
+                kv_chunk_threshold =  16#4ff,
+                kp_chunk_threshold = 2 * 16#4ff}).
 
 -define(DISK_VERSION, 1).
 

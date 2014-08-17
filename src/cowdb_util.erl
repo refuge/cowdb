@@ -1,7 +1,6 @@
 -module(cowdb_util).
 
 -include("cowdb.hrl").
--include_lib("cbt/include/cbt.hrl").
 
 
 -define(DEFAULT_COMPACT_LIMIT, 2048000).
@@ -11,7 +10,10 @@
          delete_property/2,
          apply/2,
          timestamp/0,
+         get_value/2, get_value/3,
          get_opt/2, get_opt/3,
+         reorder_results/2,
+         uniqid/0,
          init_db/6,
          maybe_sync/3,
          write_header/2,
@@ -31,7 +33,6 @@ delete_property(Key, Props) ->
         _ -> lists:keydelete(Key, 1, Props)
     end.
 
-
 apply(Func, Args) ->
     case Func of
         {M, F, A} ->
@@ -47,6 +48,17 @@ timestamp() ->
     {A, B, _} = os:timestamp(),
     (A * 1000000) + B.
 
+get_value(Key, List) ->
+    get_value(Key, List, undefined).
+
+get_value(Key, List, Default) ->
+    case lists:keysearch(Key, 1, List) of
+    {value, {Key,Value}} ->
+        Value;
+    false ->
+        Default
+    end.
+
 get_opt(Key, Opts) ->
     get_opt(Key, Opts, undefined).
 
@@ -60,6 +72,16 @@ get_opt(Key, Opts, Default) ->
         Value ->
             Value
     end.
+
+% linear search is faster for small lists, length() is 0.5 ms for 100k list
+reorder_results(Keys, SortedResults) when length(Keys) < 100 ->
+    [get_value(Key, SortedResults) || Key <- Keys];
+reorder_results(Keys, SortedResults) ->
+    KeyDict = dict:from_list(SortedResults),
+    [dict:fetch(Key, KeyDict) || Key <- Keys].
+
+uniqid() ->
+    integer_to_list(erlang:phash2(make_ref())).
 
 %% @doc initialize the db
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
@@ -84,11 +106,11 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     Less = get_opt(less, Options, DefaultLess),
     {UsrReduce, Reduce} = by_id_reduce(Options),
 
-    {ok, IdBt} = cbt_btree:open(IdP, Fd, [{compression, Compression},
+    {ok, IdBt} = cowdb_btree:open(IdP, Fd, [{compression, Compression},
                                           {less, Less},
                                           {reduce, Reduce}]),
 
-    {ok, LogBt} = cbt_btree:open(LogP, Fd, [{compression, Compression},
+    {ok, LogBt} = cowdb_btree:open(LogP, Fd, [{compression, Compression},
                                             {reduce, fun log_reduce/2}]),
 
     %% initial db record
@@ -113,7 +135,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 maybe_sync(Status, Fd, FSyncOptions) ->
     case lists:member(Status, FSyncOptions) of
         true ->
-            ok = cbt_file:sync(Fd),
+            ok = cowdb_file:sync(Fd),
             ok;
         _ ->
             ok
@@ -123,7 +145,7 @@ maybe_sync(Status, Fd, FSyncOptions) ->
 %% @doc write the db header
 write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
     ok = maybe_sync(before_header, Fd, FsyncOptions),
-    {ok, _} = cbt_file:write_header(Fd, Header),
+    {ok, _} = cowdb_file:write_header(Fd, Header),
     ok = maybe_sync(after_headerr, Fd, FsyncOptions),
     ok.
 
@@ -135,8 +157,8 @@ commit_transaction(TransactId, #db{by_id=IdBt,
 
     %% write the header
     NewHeader = OldHeader#db_header{tid=TransactId,
-                                    by_id=cbt_btree:get_state(IdBt),
-                                    log=cbt_btree:get_state(LogBt)},
+                                    by_id=cowdb_btree:get_state(IdBt),
+                                    log=cowdb_btree:get_state(LogBt)},
     ok = cowdb_util:write_header(NewHeader, Db),
     {ok, Db#db{tid=TransactId, header=NewHeader}}.
 
@@ -167,7 +189,7 @@ delete_file(FilePath) ->
     delete_file(FilePath, false).
 
 delete_file(FilePath, Async) ->
-    DelFile = FilePath ++ cbt_util:uniqid(),
+    DelFile = FilePath ++ uniqid(),
     case file:rename(FilePath, DelFile) of
     ok ->
         if (Async) ->
