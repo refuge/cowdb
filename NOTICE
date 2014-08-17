@@ -10,7 +10,8 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 Third-Party License
 -------------------
 
-files: src/cowdb_btree.erl, src/cowdb_btree_copy.erl, src/cowdb_file.er;
+files: src/cowdb_btree.erl, src/cowdb_btree_copy.erl,
+src/cowdb_file.erl
 
 Copyright 2007-2012 - The Apache Software foundation
 Copyright 2011-2014 - Couchbase
