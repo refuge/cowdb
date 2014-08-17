@@ -105,7 +105,7 @@ dependencies.
 The contributors are listed in AUTHORS. This project uses the MPL v2
 license, see LICENSE.
 
-rbeacon uses the [C4.1 (Collective Code Construction
+cowdb uses the [C4.1 (Collective Code Construction
 Contract)](http://rfc.zeromq.org/spec:22) process for contributions.
 
 ## Development
