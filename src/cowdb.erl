@@ -101,7 +101,7 @@ open(FilePath) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(FilePath, Options) ->
-    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
     gen_server:start(?MODULE, [FilePath, Options], [{spawn_opts, SpawnOpts}]).
 
 
@@ -110,7 +110,7 @@ open(FilePath, Options) ->
     {ok, Db::pid()}
     | {error, term()}.
 open(Name, FilePath, Options) ->
-    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
     gen_server:start(Name, ?MODULE, [FilePath, Options],
                      [{spawn_opts, SpawnOpts}]).
 
@@ -129,7 +129,7 @@ open_link(FilePath) ->
     | {error, term()}.
 
 open_link(FilePath, Options) ->
-    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
     gen_server:start_link(?MODULE, [FilePath, Options],
                           [{spawn_opts, SpawnOpts}]).
 
@@ -139,7 +139,7 @@ open_link(FilePath, Options) ->
     {ok, Db::pid()}
     | {error, term()}.
 open_link(Name, FilePath, Options) ->
-    SpawnOpts = cbt_util:get_opt(spawn_opts, Options, []),
+    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
     gen_server:start_link(Name, ?MODULE, [FilePath, Options],
                           [{spawn_opts, SpawnOpts}]).
 

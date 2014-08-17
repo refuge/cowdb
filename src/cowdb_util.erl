@@ -11,6 +11,7 @@
          delete_property/2,
          apply/2,
          timestamp/0,
+         get_opt/2, get_opt/3,
          init_db/6,
          maybe_sync/3,
          write_header/2,
@@ -46,16 +47,27 @@ timestamp() ->
     {A, B, _} = os:timestamp(),
     (A * 1000000) + B.
 
+get_opt(Key, Opts) ->
+    get_opt(Key, Opts, undefined).
+
+get_opt(Key, Opts, Default) ->
+    case proplists:get_value(Key, Opts) of
+        undefined ->
+            case application:get_env(?MODULE, Key) of
+                {ok, Value} -> Value;
+                undefined -> Default
+            end;
+        Value ->
+            Value
+    end.
 
 %% @doc initialize the db
 init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     DefaultFSyncOptions = [before_header, after_header, on_file_open],
-    FSyncOptions = cbt_util:get_opt(fsync_options, Options,
-                                    DefaultFSyncOptions),
+    FSyncOptions = get_opt(fsync_options, Options, DefaultFSyncOptions),
 
-    CompactLimit = cbt_util:get_opt(compact_limit, Options,
-                                    ?DEFAULT_COMPACT_LIMIT),
-    AutoCompact = cbt_util:get_opt(auto_compact, Options, false),
+    CompactLimit = get_opt(compact_limit, Options, ?DEFAULT_COMPACT_LIMIT),
+    AutoCompact = get_opt(auto_compact, Options, false),
 
     %% maybe sync the header
     ok = maybe_sync(on_file_open, Fd, FSyncOptions),
@@ -67,9 +79,9 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 
 
     %% initialize the btree
-    Compression = cbt_util:get_opt(compression, Options, ?DEFAULT_COMPRESSION),
+    Compression = get_opt(compression, Options, ?DEFAULT_COMPRESSION),
     DefaultLess = fun(A, B) -> A < B end,
-    Less = cbt_util:get_opt(less, Options, DefaultLess),
+    Less = get_opt(less, Options, DefaultLess),
     {UsrReduce, Reduce} = by_id_reduce(Options),
 
     {ok, IdBt} = cbt_btree:open(IdP, Fd, [{compression, Compression},
