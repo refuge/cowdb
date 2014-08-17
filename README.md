@@ -66,7 +66,7 @@ dependencies.
     $ make
 ```
 
-### 4. Run tests
+### 3. Run tests
 
 ```
     $ make test
@@ -122,7 +122,11 @@ Under C4.1 process, you are more than welcome to help us by:
 * star this project ^_^
 
 To  run the test suite:
-$ make test
+
+```
+    $ make test
+```
+
 
 
 ## Modules ##
