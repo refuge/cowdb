@@ -4,7 +4,7 @@ CowDB implements an indexed, key/value storage engine. The primary index
 is an append-only btree which is implemented by CBT - a btree library
 extracted from Apache CouchDB .
 
-CowDB is released under the Apache License 2.
+CowDB is released under the Mozilla Public License, v. 2.0
 
 ## Features
 
