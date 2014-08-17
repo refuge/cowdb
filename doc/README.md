@@ -2,7 +2,7 @@
 
 # CowDB - Pure Key/Value database for Erlang Applications #
 
-Copyright (c) 2014 Benoit Chesneau (Apache 2 License)
+Copyright (c) 2014 Benoit Chesneau And the CowDB authors.
 
 __Version:__ 0.4.1
 
