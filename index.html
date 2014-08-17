@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CowDB - Pure Key/Value database for Erlang Applications.</title>
+
+    <!-- Bootstrap -->
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+    <link href="css/style.css" rel="stylesheet">
+
+    <!-- HTML5 Shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+      <script src="https://oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
+    <![endif]-->
+  </head>
+  <body class="container">
+   <header>
+
+    <ul class="row menu">
+      <li class="col-xs-12 col-md-4">
+      <h1><a href="index.html">CowDB</a></h1>
+      <h2>Key/Value database for Erlang Applications.</h2>
+      </li>
+      <li class="col-xs-4 col-md-2 col-md-offset-2"><h2>Contribute</h2>
+        <ul>
+          <li><a href="https://github.com/refuge/cowdb/issues">Bug Tracker</a></li>
+          <li><a href="https://wiki.refuge.io/display/COWDB/Changelog">Changelog</a></li>
+          </li>
+        </ul>
+      </li>
+      <li class="col-xs-4 col-md-2"><h2>Docs</h2>
+        <ul>
+          <li><a
+            href="https://wiki.refuge.io/display/COWDB/Getting+Started">Getting
+          Started</a></li>
+          <li><a href="https://wiki.refuge.io/display/COWDB/CowDB+Documentation+Home">Manual</a></li>
+          <li>
+            <a
+              href="https://wiki.refuge.io/display/COWDB/API+Reference">API
+          Reference</a></li>
+          </li>
+        </ul>
+      </li>
+      <li class="col-xs-4 col-md-2"><h2>Community</h2>
+        <ul>
+          <li>
+            <a href="https://github.com/refuge/cowdb">Github</a>
+          </li>
+          <li>
+             <a href="http://twitter.com/refugeio">Twitter</a>
+          </li>
+          <li>
+            <a href="https://groups.google.com/forum/#!forum/cowdb-dev">Mailing List</a>
+          </li>
+          <li>
+            <a
+              href="http://webchat.freenode.net/?channels=refuge.io">IRC</a>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </header>
+
+     <div class="row install-row">
+      <div class="col-md-8">
+        <p class="pitch">
+        <b>Cowdb</b> implements an indexed, key/value storage engine.<br/>
+      <a href="https://wiki.refuge.io/display/COWDB/Getting+Started">Get
+      started!</a>
+        </p>
+      </div>
+      <div class="col-md-4 install-box">
+          <span class="version-rec-box-inner">
+            current version: <strong>0.4.1</strong>
+            </span>
+          </span>
+        <a class="btn btn-primary" id="inst-link"
+          href="https://github.com/refuge/cowdb">Source</a>
+        <a class="btn btn-default" href="https://github.com/refuge/cowdb/releases" role="button">Other Downloads</a>
+      </div>
+    </div>
+
+        <div class="row code-row">
+      <div class="col-md-4">
+      <h2>Featuring</h2>
+      <ul class="laundry-list">
+        <li>Append-Only b-tree using COW</li>
+        <li>Read/Write can happen independently</li>
+        <li>Put/Get/Delete/Fold operations</li>
+        <li>support <strong>transactions</strong> </li>
+        <li><strong>transaction functions</strong></li>
+        <li>Transaction log</span></li>
+        <li>Snapshotting support</li>
+        <li>Automatic compaction</li>
+
+      </ul>
+      </div>
+      <div class="col-md-8">
+
+        <div id="static-code">
+<pre class='cowdb'>
+1> {ok, Pid} = <span class='kw'>cowdb:open</span>("testing.db").
+{ok,<0.35.0>}
+2> <span class='kw'>cowdb:put</span>(Pid, a, 1).
+{ok, 1}
+3> <span class='kw'>cowdb:get</span>(Pid, a).
+{ok,{a,1}}
+4> <span class='kw'>cowdb:mget</span>(Pid, [a, b]).
+[{ok,{a,1}},not_found]
+5> <span class='kw'>cowdb:put</span>(Pid, b, 2).
+{ok, 2}
+6> <span class='kw'>cowdb:mget</span>(Pid, [a, b]).
+[{ok,{a,1}},{ok,{b,2}}]
+7> <span class='kw'>cowdb:mget(</span>Pid, [a, b, c, d]).
+[{ok,{a,1}},{ok,{b,2}},not_found,not_found]
+8> <span class='kw'>cowdb:transact</span>(Pid, [
+    {add, c, 2},
+    {remove, b},
+    {fn, <span class='kw'>fun</span>(Db) ->
+                {ok, {a, V}} <span class='op'>=</span> cowdb:get(Db, a),
+                [{add, d, V}] end}]).
+{ok, 3}
+9> <span class='kw'>cowdb:mget</span>(Pid, [a, b, c, d]).
+[{ok,{a,1}},not_found,{ok,{c,2}},{ok,{d,1}}]
+10> <span class='kw'>cowdb:fold</span>(Pid, fun(Got, Acc) <span
+class='op'>-></span> {ok, [Got | Acc]} end, []).
+{ok,{[],[3]},[{d,1},{c,2},{a,1}]}
+</pre>
+        </div>
+      </div>
+    </div>
+    <p class="footnote">
+      <span class="asterisk">*</span>cowdb is an open source project developped for the <a
+      href="http://refuge.io">Refuge project</a> and sponsored by <a
+      href="http://enkim.eu">Enki Multimedia</a>, under the Mozilla
+    Public Licence v2.0</span></p>
+
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+    <!-- Include all compiled plugins (below), or include individual files as needed -->
+    <script src="js/bootstrap.min.js"></script>
+  </body>
+</html>
