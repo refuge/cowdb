@@ -64,7 +64,7 @@ compress(Term, snappy) ->
     end;
 compress(Term, gzip) ->
     Bin = ?term_to_bin(Term),
-    {ok, CompressedBin} = zlib:gzip(Bin),
+    CompressedBin = zlib:gzip(Bin),
     case use_compressed(byte_size(Bin), byte_size(CompressedBin)) of
         true ->
             <<?GZIP_PREFIX, CompressedBin/binary>>;
