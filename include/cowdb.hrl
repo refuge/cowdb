@@ -10,6 +10,8 @@
 % License for the specific language governing permissions and limitations under
 % the License.
 
+-define(SERVER_NAME, cowdb).
+
 -define(DEFAULT_COMPRESSION, none).
 
 -define(term_to_bin(T), term_to_binary(T, [{minor_version, 1}])).
@@ -19,6 +21,9 @@
     catch _:_ ->
         byte_size(?term_to_bin(T))
     end).
+
+
+
 
 -record(btree, {fd,
                 root,
@@ -39,34 +44,20 @@
                     by_id=nil,
                     log=nil}).
 
--record(db, {tid=-1,
-             start_time,
-             db_pid,
-             updater_pid,
-             compactor_info=nil,
+-record(db, {parent,
+             server,
              fd,
-             reader_fd,
-             by_id=nil,
-             log=nil,
-             header,
-             file_path,
-             fsync_options,
-             auto_compact=false,
-             compact_limit,
-             reduce_fun=nil,
-             options}).
+             name,
+             mode,
+             file,
+             update_mode}).
 
+
+-record(open_args, {file,
+                    mode,
+                    wal_thresold}).
 
 -record(transaction, {tid,
                       by_id=nil,
                       ops=[],
                       ts}).
-
--record(store, {db,
-                id}).
-
--define(IF_TRANS(Status, Fun),
-        case erlang:get(cowdb_trans) of
-            Status -> Fun();
-            Other -> {bad_transaction_state, Other}
-        end).

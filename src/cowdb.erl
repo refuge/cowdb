@@ -1,483 +1,293 @@
-%%
-%% This Source Code Form is subject to the terms of the Mozilla Public
-%% License, v. 2.0. If a copy of the MPL was not distributed with this
-%% file, You can obtain one at http://mozilla.org/MPL/2.0/.
-%%
-
 -module(cowdb).
--behaviour(gen_server).
+
+-export([start/0, stop/0]).
+-export([open_db/2, close_db/1, verbose/0, verbose/1]).
 
 
-%% PUBLIC API
--export([open/1, open/2, open/3,
-         open_link/1, open_link/2, open_link/3,
-         close/1,
-         drop_db/1, drop_db/2,
-         database_info/1,
-         count/1,
-         data_size/1,
-         get/2,
-         mget/2,
-         lookup/2,
-         put/2, put/3,
-         mput/2,
-         delete/2,
-         mdelete/2,
-         fold/3, fold/4,
-         full_reduce/1,
-         fold_reduce/4,
-         transact/2, transact/3,
-         log/4, log/5,
-         get_snapshot/2,
-         compact/1,
-         cancel_compact/1]).
-
-
-%% gen server callbacks
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         code_change/3, terminate/2]).
+%% internal methods
+-export([istart_link/1, add_user/3, remove_user/2, internal_open/2,
+         internal_close/1, init/2, system_continue/3, system_terminate/4,
+         system_code_change/4]).
 
 
 -include("cowdb.hrl").
 
--type compression_method() :: snappy | lz4 | gzip
-                              | {deflate, Level::integer()} | none.
--type fsync_options() :: [before_header | after_header | on_file_open].
--type open_options() :: [{compression,compression_method()}
-                         | {fsync_options, fsync_options()}
-                         | auto_compact | {auto_compact, boolean()}
-                         | {compact_limit, integer()}
-                         | {reduce, fun()}
-                         | {less, fun()}
-                         | {init_func, fun()}].
--type cow_mfa() :: {local, Name::atom()}
-    | {global, GlobalName::term()}
-    | {via, ViaName::term()}.
 
--export_type([compression_method/0,
-              fsync_options/0,
-              open_options/0,
-              cow_mfa/0]).
+start() ->
+    cowdb_server:start().
 
--type db() :: #db{} | pid().
--export_type([db/0]).
-
--type fold_options() :: [{dir, fwd | rev} | {start_key, term()} |
-                         {end_key, term()} | {end_key_gt, term()} |
-                         {key_group_fun, fun()}].
--export_type([fold_options/0]).
-
--type transact_fn() :: {module(), fun(), [any()]} |
-                       {module(), fun()} |
-                       fun().
--type transact_id() :: integer() | tx_end.
--type transact_ops() :: [{add, term(), any()} |
-                         {remove, term()} |
-                         {fn, transact_fn()}].
--export_type([transact_fn/0,
-              transact_id/0,
-              transact_ops/0]).
-
-%% @doc open a cowdb database, pass a function to initialise the stores and
-%% indexes.
--spec open(FilePath::string()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
-open(FilePath) ->
-    open(FilePath, []).
+stop() ->
+    cowdb_server:stop().
 
 
-%% @doc open a cowdb database, pass a function to initialise the stores and
-%% indexes.
--spec open(FilePath::string(), Option::open_options()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
-open(FilePath, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
-    gen_server:start(?MODULE, [FilePath, Options], [{spawn_opts, SpawnOpts}]).
+open_db(Db, Args) ->
+    case catch defaults(Db, Args) of
+        OpenArgs when is_record(OpenArgs, open_args) ->
+            case cowdb_server:open_db(Db, OpenArgs) of
+                badarg -> % Should not happen.
+                    erlang:error(cowdb_process_died, [Db, Args]);
+                Reply ->
+                   Reply
+            end;
+	_ ->
+	    erlang:error(badarg, [Db, Args])
+    end.
+
+close_db(Db) ->
+    case cowdb_server:close_db(Db) of
+        badarg ->
+            {error, not_owner};
+        Reply ->
+            Reply
+    end.
 
 
-%% @doc Create or open a cowdb store with a registered name.
--spec open(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
-open(Name, FilePath, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
-    gen_server:start(Name, ?MODULE, [FilePath, Options],
-                     [{spawn_opts, SpawnOpts}]).
+verbose() ->
+    verbose(true).
 
-%% @doc open a cowdb database as part of the supervision tree, pass a
-%% function to initialise the stores and indexes.
--spec open_link(FilePath::string()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
+verbose(What) ->
+    ok = cowdb_server:verbose(What),
+    All = cowdb_server:all(),
+    lists:foreach(fun(Db) ->
+                          dbreq(Db, {set_verbose, What})
+                  end, All),
+    All.
 
-open_link(FilePath) ->
-    open_link(FilePath, []).
+%%-----------------------------------------------------------------
+%% internal API
+%%-----------------------------------------------------------------
 
-%% @doc open a cowdb database as part of the supervision tree
--spec open_link(FilePath::string(), Option::open_options()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
 
-open_link(FilePath, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
-    gen_server:start_link(?MODULE, [FilePath, Options],
-                          [{spawn_opts, SpawnOpts}]).
+add_user(Pid, Tab, Args) ->
+    req(Pid, {add_user, Tab, Args}).
 
-%% @doc open a cowdb database as part of the supervision tree with a
-%% registered name
--spec open_link(Name::cow_mfa(), FilePath::string(), Option::open_options()) ->
-    {ok, Db::pid()}
-    | {error, term()}.
-open_link(Name, FilePath, Options) ->
-    SpawnOpts = cowdb_util:get_opt(spawn_opts, Options, []),
-    gen_server:start_link(Name, ?MODULE, [FilePath, Options],
-                          [{spawn_opts, SpawnOpts}]).
+remove_user(Pid, From) ->
+    req(Pid, {close, From}).
 
-%% @doc Close the file.
--spec close(DbPid::pid()) -> ok.
-close(DbPid) ->
-    try
-        gen_server:call(DbPid, close, infinity)
+
+internal_open(Pid, Args) ->
+    req(Pid, {internal_open,Args}).
+
+internal_close(Pid) ->
+    req(Pid, close).
+
+
+dbreq(Db, R) ->
+    case catch cowdb_server:get_pid(Db) of
+        Pid when is_pid(Pid) ->
+            req(Pid, R);
+        _ ->
+            badarg
+    end.
+
+req(Proc, R) ->
+    Ref = erlang:monitor(process, Proc),
+    Proc ! ?COWDB_CALL(self(), R),
+    receive
+        {'DOWN', Ref, process, Proc, _Info} ->
+            badarg;
+        {Proc, Reply} ->
+            erlang:demonitor(Ref, [flush]),
+            Reply
+    end.
+
+
+istart_link(Server) ->
+    {ok, proc_lib:spawn_link(cowdb, init, [self(), Server])}.
+
+
+init(Parent, Server) ->
+    db_loop(#db{parent=Parent, server=Server}).
+
+db_loop(Db) ->
+    receive
+        ?COWDB_CALL(From, Op) ->
+           do_apply_op(Op, From, Db);
+        {'EXIT', Pid, Reason} when Pid =:= Db#db.parent ->
+            _NewDb = do_stop(Db),
+            exit(Reason);
+        {'EXIT', Pid, Reason} when Pid =:= Db#db.server ->
+            %% The server is gone.
+            _NewDb = do_stop(Db),
+            exit(Reason);
+        {'EXIT', Pid, _Reason} ->
+            %% Compaction process exited
+            Db2 = remove_compactor(Db, Pid, close),
+            db_loop(Db2);
+        {system, From, Req} ->
+            sys:handle_system_msg(Req, From, Db#db.parent, ?MODULE, [], Db);
+        Message ->
+            error_logger:format("** cowdb: unexpected message"
+                                "(ignored): ~w~n", [Message]),
+            db_loop(Db)
+    end.
+
+
+do_apply_op(Op, From, Db) ->
+    try apply_op(Op, From, Db) of
+        ok ->
+            db_loop(Db);
+        Db2 when is_record(Db2, db) ->
+            db_loop(Db2)
     catch
-        exit:{noproc,_} -> ok;
-        exit:noproc -> ok;
-        %% Handle the case where the monitor triggers
-        exit:{normal, _} -> ok
+        exit:normal ->
+            exit(normal);
+        _:Error ->
+            Name = Db#db.name,
+            case cowdb_util:debug_mode() of
+                true ->
+                    error_logger:format
+                      ("** cowdb: Bug was found when accessing db ~w,~n"
+                       "** cowdb: operation was ~p and reply was ~w.~n"
+                       "** cowdb: Stacktrace: ~w~n",
+                       [Name, Op, Error, erlang:get_stacktrace()]);
+                false ->
+                    error_logger:format
+                      ("** cowdb: Bug was found when accessing db ~w~n",
+                       [Name])
+            end,
+            if
+                From =/= self() ->
+                    From ! {self(), {error, {cowdb_bug, Name, Op, Error}}},
+                    ok;
+                true ->
+                    ok
+            end,
+            db_loop(Db)
     end.
 
-%% @doc delete a database
--spec drop_db(db()) -> ok | {error, term()}.
-drop_db(DbPid) ->
-    drop_db(DbPid, false).
+apply_op(Op, From, Db) ->
+    case Op of
+        {add_user, DbName, OpenArgs} ->
+             #open_args{file = Fname,
+                        mode = Mode} = OpenArgs,
+             Res = if
+                       DbName =:= Db#db.name,
+                       Db#db.mode =:= Mode,
+                       Db#db.file =:= Fname ->
+                           ok;
+                       true ->
+                           err({error, incompatible_arguments})
+                   end,
+             From ! {self(), Res},
+             ok;
 
-%% @doc delete a database asynchronously or not
--spec drop_db(db(), boolean()) -> ok | {error, term()}.
-drop_db(DbPid, Async) ->
-    #db{file_path=FilePath}=gen_server:call(DbPid, get_db, infinity),
-    ok = close(DbPid),
-    cowdb_util:delete_file(FilePath, Async).
-
-%% @doc returns database info
--spec database_info(db()) -> {ok, list()}.
-database_info(DbPid) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    database_info(Db);
-database_info(#db{tid=EndT, start_time=StartTime, fd=Fd, by_id=IdBt, log=LogBt,
-            compactor_info=Compactor, file_path=FilePath,
-            header=#db_header{version=Version}}) ->
-    {ok, _, StartT} = cowdb_btree:fold(LogBt, fun({TransactId, _}, _) ->
-                {stop, TransactId}
-        end, nil, []),
-    {ok, TxCount} = cowdb_btree:full_reduce(LogBt),
-    {ok, DiskSize} = cowdb_file:bytes(Fd),
-
-    {ObjCount, DataSize} =  case cowdb_btree:full_reduce(IdBt) of
-        {ok, {Count, Size, _}} ->{Count, Size};
-        {ok, {Count, Size}} -> {Count, Size}
-    end,
-
-    {ok, [{file_path, FilePath},
-          {object_count, ObjCount},
-          {tx_count, TxCount},
-          {tx_start, StartT},
-          {tx_end, EndT},
-          {compact_running, Compactor/=nil},
-          {disk_size, DiskSize},
-          {data_size, DataSize},
-          {start_time, StartTime},
-          {db_version, Version}]}.
-
-%% @doc get the number of objects stored in the database.
--spec count(db()) -> {ok, integer()} | {error, term()}.
-count(DbPid) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    count(Db);
-count(#db{by_id=IdBt}) ->
-    case cowdb_btree:full_reduce(IdBt) of
-        {ok, {Count, _, _}} -> {ok, Count};
-        {ok, {Count, _}} -> {ok, Count}
+        close  ->
+	        From ! {self(), fclose(Db)},
+	        exit(normal);
+        {close, _Pid} ->
+            %% Used from cowsb_server when Pid has closed the database,
+            %% but the database is still opened by some process.
+            From ! {self(), status(Db)},
+            Db;
+        {internal_open, Args} ->
+            case do_open_file(Args, Db) of
+                {ok, Db2} ->
+                    From ! {self(), ok},
+                    Db2;
+                Error ->
+                    From ! {self(), Error},
+                    exit(normal)
+            end;
+        {set_verbose, What} ->
+            cowdb_util:set_verbose(What),
+            From ! {self(), ok},
+            ok
     end.
 
-%% @doc get the total size of the objects stored in the database.
--spec data_size(db()) -> {ok, integer()} | {error, term()}.
-data_size(DbPid) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    data_size(Db);
-data_size(#db{by_id=IdBt, log=LogBt}) ->
-    VSize = case cowdb_btree:full_reduce(IdBt) of
-        {ok, {_, Size, _}} -> Size;
-        {ok, {_, Size}} -> Size
-    end,
-    TotalSize = lists:sum([VSize, cowdb_btree:size(IdBt),
-                           cowdb_btree:size(LogBt)]),
-    {ok, TotalSize}.
 
-%% @doc get an object by the specified key
--spec get(Db::db(), Key::any()) -> {ok, any()} | {error, term()}.
-get(Db, Key) ->
-    [Val] = mget(Db, [Key]),
-    Val.
+%%-----------------------------------------------------------------
+%% Callback functions for system messages handling.
+%%-----------------------------------------------------------------
+system_continue(_Parent, _, Db) ->
+    db_loop(Db).
 
-%% @doc deprecated: use mget/2 instead.
--spec lookup(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
-lookup(DbPid, Keys) ->
-    mget(DbPid, Keys).
+system_terminate(Reason, _Parent, _, Db) ->
+    _NewDb = do_stop(Db),
+    exit(Reason).
+
+%%-----------------------------------------------------------------
+%% Code for upgrade.
+%%-----------------------------------------------------------------
+system_code_change(State, _Module, _OldVsn, _Extra) ->
+    {ok, State}.
 
 
-%% @doc get a list of objects by the specified key
--spec mget(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
-mget(DbPid, Keys) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    mget(Db, Keys);
-mget(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
-    Results = cowdb_btree:lookup(IdBt#btree{fd=Fd}, Keys),
-    lists:foldr(fun
-            ({ok, {Key, {_, {Pos, _}, _, _}}}, Acc) ->
-                {ok, Val} = cowdb_file:pread_term(Fd, Pos),
-                [{ok, {Key, Val}} | Acc];
-            (Else, Acc) ->
-                [Else | Acc]
-        end, [], Results).
-
-%% @doc fold all objects form the database
--spec fold(db(), fun(), any()) -> {ok, any(), any()} | {error, term()}.
-fold(DbPid, Fun, Acc) ->
-    fold(DbPid, Fun, Acc, []).
-
-%% @doc fold all objects form the database with range options
--spec fold(db(), fun(), any(), fold_options())
-    -> {ok, any()}
-    | {error, term()}.
-fold(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    fold(Db, Fun, Acc, Options);
-fold(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
-    Wrapper = fun({Key, {_, {Pos, _}, _, _}}, Acc1) ->
-            {ok, Val} = cowdb_file:pread_term(Fd, Pos),
-            Fun({Key, Val}, Acc1)
-    end,
-    {ok, _, AccOut} = cowdb_btree:fold(IdBt#btree{fd=Fd}, Wrapper, Acc,
-                                     Options),
-    {ok, AccOut}.
+%%-----------------------------------------------------------------
+%% internal functions
+%%-----------------------------------------------------------------
 
 
-%% @doc return the full reduced value
--spec full_reduce(db()) -> {ok, any()}.
-full_reduce(DbPid) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    full_reduce(Db);
-full_reduce(#db{by_id=IdBt}) ->
-    case cowdb_btree:full_reduce(IdBt) of
-        {ok, {_, _}} ->
-            {ok, []};
-        {ok, {_, _, UsrRed}} ->
-            {ok, UsrRed}
-    end.
+%% Process the args list as provided to open_db/2.
+defaults(Tab, Args) ->
+    Defaults0 = #open_args{file = to_list(Tab),
+                           mode = live},
+    Fun = fun repl/2,
+    lists:foldl(Fun, Defaults0, Args).
 
-%% @doc fold the reduce function over the results.
-fold_reduce(DbPid, Fun, Acc, Options) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    fold_reduce(Db, Fun, Acc, Options);
-fold_reduce(#db{reduce_fun=nil}, _Fun, _Acc, _Options) ->
-    {error, undefined_reduce_fun};
-fold_reduce(#db{reader_fd=Fd, by_id=IdBt}, Fun, Acc, Options) ->
-    WrapperFun = fun(GroupedKey, PartialReds, Acc0) ->
-            {_, _, Reds} = cowdb_btree:final_reduce(IdBt, PartialReds),
-            Fun(GroupedKey, Reds, Acc0)
-    end,
-    cowdb_btree:fold_reduce(IdBt#btree{fd=Fd}, WrapperFun, Acc, Options).
+to_list(T) when is_atom(T) -> atom_to_list(T);
+to_list(T) -> T.
 
 
-%% @doc add one object to a store
--spec put(db(), {term(), any()}) -> {ok, transact_id()} | {error, term()}.
-put(DbPid, {Key, Value}) ->
-    put(DbPid, Key, Value).
+repl({mode, M}, Defs) ->
+    m(M, [snapshot, live]),
+    Defs#open_args{mode = M};
+repl({file, File}, Defs) ->
+    Defs#open_args{file = to_list(File)};
+repl({_, _}, _) ->
+    exit(badarg).
 
-%% @doc add one object to a store
--spec put(db(), term(), any()) -> {ok, transact_id()} | {error, term()}.
-put(DbPid, Key, Value) ->
-    transact(DbPid, [{add, Key, Value}]).
-
-
-%% @doc add multiple objects to a store
--spec mput(db(), [{term(), any()}]) -> {ok, transact_id()} | {error, term()}.
-mput(Db, KVs) when is_list(KVs) ->
-    transact(Db, [{add, K, V} || {K, V} <- KVs]).
-
-%% @doc delete one object from the store
--spec delete(db(), term()) -> {ok, transact_id()} | {error, term()}.
-delete(Db, Key) ->
-    transact(Db, [{remove, Key}]).
-
-%% @doc delete multiple object at once
--spec mdelete(db(), [term()]) -> {ok, transact_id()} | {error, term()}.
-mdelete(Db, Keys) ->
-    transact(Db, [{remove, Key} || Key <- Keys]).
+maybe_put(_, undefined) ->
+    ignore;
+maybe_put(K, V) ->
+    put(K, V).
 
 
-%% @doc execute a transaction
-%% A transaction received operations to execute as a list:
-%% <ul>
-%% <li>`{add, Key, Value}' to add an object</li>
-%% <li>`{remove, Key}' to remove a value</li>
-%%<li> `{fn, Func}' a transaction function. A transaction function
-%%received the db value like it was at the beginning of the transaction
-%%as an argument. It's possible to pass arguments to it. A transaction
-%%function return a list of operations and can query/manipulate
-%%function. The list of operations returned can also contain a
-%%function.</li>
-%%</ul>
-%%
--spec transact(db(), transact_ops()) ->
-    {ok, transact_id()}
-    | {error, term()}.
-transact(Ref, OPs) ->
-    transact(Ref, OPs, infinity).
-
--spec transact(db(), transact_ops(), timeout()) ->
-    {ok, transact_id()}
-    | {error, term()}.
-transact(Ref, OPs, Timeout) ->
-    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
-    cowdb_updater:transact(UpdaterPid, OPs, Timeout).
-
-%% @doc compact the database file
--spec compact(db()) -> ok | {error, term()}.
-compact(Ref) ->
-    UpdaterPid = gen_server:call(Ref, get_updater, infinity),
-    cowdb_updater:compact(UpdaterPid, []).
-
-%% @doc cancel compaction
--spec cancel_compact(db()) -> ok.
-cancel_compact(Ref) ->
-     UpdaterPid = gen_server:call(Ref, get_updater, infinity),
-    cowdb_updater:cancel_compact(UpdaterPid).
-
-%% @doc fold the transaction log
--spec log(Db::db(), StartT::transact_id(), Function::fun(), Acc::any()) ->
-    {ok, NbTransactions::integer(), Acc2::any()}
-    | {error, term()}.
-log(Db, StartT, Fun, Acc) ->
-    log(Db, StartT, tx_end, Fun, Acc).
-
-%% @doc fold the transaction log
-%% Args:
-%% <ul>
-%% <li>`Db': the db value (in transaction function) or pid</li>
-%% <li>`StartT': transaction ID to start from</li>
-%% <li>`EndT': transaction ID to stop</li>
-%% <li>`Fun': function collection log result:
-%% ```
-%% fun({TransactId, Op, {K,V}, Ts}, Acc) ->
-%%      {ok, Acc2} | {stop, Acc2}
-%%  end
-%% '''
-%% where TransactId is the transaction ID `Transactid' where the `OP'
-%% (`add' or `remove') on the Key/Value pair `{K, V}' has been run on
-%% the unix time `Ts'.</li>
-%% <li>`Acc': initial value to pass to the function.</li>
-%% </ul>
-%% The function return the total number of transactions in the range and
-%% the values collected during folding.
--spec log(Db::db(), StartT::transact_id(), EndT::transact_id(),
-          Function::fun(), Acc::any()) ->
-    {ok, NbTransactions::integer(), Acc2::any()}
-    | {error, term()}.
-log(DbPid, StartT, EndT, Fun, Acc) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    log(Db, StartT, EndT, Fun, Acc);
-log(#db{tid=LastTid, reader_fd=Fd, log=LogBt}, StartT, EndT0, Fun, Acc) ->
-    EndT = case EndT0 of
-        tx_end -> LastTid;
-        _ when EndT0 > LastTid -> LastTid;
-        _ -> EndT0
-    end,
-
-    Wrapper = fun({_TransactId, #transaction{ops=Ops}}, Acc1) ->
-            fold_log_ops(lists:reverse(Ops), Fd, Fun, Acc1)
-    end,
-    LogBt2 = LogBt#btree{fd=Fd},
-    {ok, Reds, Result} = cowdb_btree:fold(LogBt2, Wrapper, Acc,
-                                        [{start_key, StartT}, {end_key, EndT}]),
-    Count = cowdb_btree:final_reduce(LogBt2, Reds),
-    {ok, Count, Result}.
-
-
-%% fold operations in a transaction.
-fold_log_ops([], _Fd, _Fun, Acc) ->
-    {ok, Acc};
-fold_log_ops([{Op, {Key, {Pos, _}, TransactId, Ts}} | Rest], Fd, Fun, Acc) ->
-    {ok, Val} = cowdb_file:pread_term(Fd, Pos),
-    case Fun({TransactId, Op, {Key, Val}, Ts}, Acc) of
-        {ok, Acc2} ->
-            fold_log_ops(Rest, Fd, Fun, Acc2);
-        {stop, Acc2} ->
-            {stop, Acc2}
-    end.
-
-%% @doc get a snapshot of the database at some point.
--spec get_snapshot(db(), transact_id()) -> {ok, db()} | {error, term()}.
-get_snapshot(DbPid, TransactId) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    get_snapshot(Db, TransactId);
-get_snapshot(#db{tid=Tid}=Db, tx_end)->
-    get_snapshot(Db, Tid);
-get_snapshot(#db{log=LogBt, reader_fd=Fd, by_id=IdBt}=Db, TransactId) ->
-    case cowdb_btree:lookup(LogBt#btree{fd=Fd}, [TransactId]) of
-        [not_found] ->
-            {error, not_found};
-        [{ok, {_TransactId, #transaction{by_id=SnapshotRoot}}}] ->
-            IdSnapshot = IdBt#btree{root=SnapshotRoot},
-            {ok, Db#db{by_id=IdSnapshot}}
-    end.
-
-%% --------------------
-%% gen_server callbacks
-%% --------------------
-
-%% @private
-init([FilePath, Options]) ->
-    process_flag(trap_exit, true),
-    case cowdb_updater:start_link(FilePath, Options, self()) of
-        {ok, UpdaterPid} ->
-            cowdb_updater:get_db(UpdaterPid);
+do_open_file([Name, OpenArgs, Verbose], Db) ->
+    case cowdb_file:open(OpenArgs#open_args.file, [create_if_missing]) of
+        {ok, Fd} ->
+            maybe_put(verbose, Verbose),
+            {ok, Db#db{name=Name,
+                       fd=Fd,
+                       file=OpenArgs#open_args.file,
+                       mode= live}};
         Error ->
             Error
     end.
 
-%% @private
-handle_call(get_db, _From, Db) ->
-    {reply, Db, Db};
 
-handle_call(get_updater, _From, #db{updater_pid=UpdaterPid}=Db) ->
-    {reply, UpdaterPid, Db};
+m(X, L) ->
+    case lists:member(X, L) of
+        true -> true;
+        false -> exit(badarg)
+    end.
 
 
-handle_call(close, _From, #db{updater_pid=UpdaterPid}=Db) ->
-    {stop, normal, cowdb_updater:close(UpdaterPid), Db};
 
-handle_call(_Msg, _From, State) ->
-    {noreply, State}.
+do_stop(Db) ->
+    fclose(Db).
 
-%% @private
-handle_cast({db_updated, Db}, _State) ->
-    {noreply, Db};
+fclose(#db{fd=Fd}=_Db) ->
+    cowdb_file:close(Fd).
 
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+status(Db) ->
+    case Db#db.update_mode of
+        saved -> ok;
+        dirty -> ok;
+        compacting -> ok;
+        Error -> Error
+    end.
 
-%% @private
-handle_info({'EXIT', Pid, Reason}, #db{updater_pid=Pid}=Db) ->
-    {stop, Reason, Db};
-handle_info(_Info, State) ->
-    {noreply, State}.
-
-%% @private
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%% @private
-terminate(_Reason, _State) ->
+remove_compactor(_Db, _Pid, _Reason) ->
     ok.
+
+
+
+err(Error) ->
+    case get(verbose) of
+	yes ->
+	    error_logger:format("** cowdb: failed with ~w~n", [Error]),
+	    Error;
+	undefined  ->
+	    Error
+    end.
