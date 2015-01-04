@@ -2,9 +2,9 @@
 
 # CowDB - Pure Key/Value database for Erlang Applications #
 
-Copyright (c) 2014 Benoit Chesneau and the contributors.
+Copyright (c) 2014-2015 Benoit Chesneau and the contributors.
 
-__Version:__ 0.4.1
+__Version:__ 0.4.2
 
 __Authors:__ Benoit Chesneau ([`benoitc@refuge.io`](mailto:benoitc@refuge.io)).
 
@@ -30,7 +30,7 @@ history is lost during the transaction.
 
 ## Usage
 
-Look at the [`cowdb`](http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb.md) module for the API usage.
+Look at the [`cowdb`](http://github.com/refuge/cowdb/blob/master/doc/cowdb.md) module for the API usage.
 
 main CowDB website is http://cowdb.org
 
@@ -131,6 +131,6 @@ To  run the test suite:
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb.md" class="module">cowdb</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb_util.md" class="module">cowdb_util</a></td></tr></table>
+<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb.md" class="module">cowdb</a></td></tr>
+<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_util.md" class="module">cowdb_util</a></td></tr></table>
 
