@@ -7,7 +7,7 @@
 -module(cowdb_util).
 
 -include("cowdb.hrl").
-
+-include_lib("cbt/include/cbt.hrl").
 
 -define(DEFAULT_COMPACT_LIMIT, 2048000).
 
@@ -112,11 +112,11 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
     Less = get_opt(less, Options, DefaultLess),
     {UsrReduce, Reduce} = by_id_reduce(Options),
 
-    {ok, IdBt} = cowdb_btree:open(IdP, Fd, [{compression, Compression},
+    {ok, IdBt} = cbt_btree:open(IdP, Fd, [{compression, Compression},
                                           {less, Less},
                                           {reduce, Reduce}]),
 
-    {ok, LogBt} = cowdb_btree:open(LogP, Fd, [{compression, Compression},
+    {ok, LogBt} = cbt_btree:open(LogP, Fd, [{compression, Compression},
                                             {reduce, fun log_reduce/2}]),
 
     %% initial db record
@@ -141,7 +141,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
 maybe_sync(Status, Fd, FSyncOptions) ->
     case lists:member(Status, FSyncOptions) of
         true ->
-            ok = cowdb_file:sync(Fd),
+            ok = cbt_file:sync(Fd),
             ok;
         _ ->
             ok
@@ -151,7 +151,7 @@ maybe_sync(Status, Fd, FSyncOptions) ->
 %% @doc write the db header
 write_header(Header, #db{fd=Fd, fsync_options=FsyncOptions}) ->
     ok = maybe_sync(before_header, Fd, FsyncOptions),
-    {ok, _} = cowdb_file:write_header(Fd, Header),
+    {ok, _} = cbt_file:write_header(Fd, Header),
     ok = maybe_sync(after_headerr, Fd, FsyncOptions),
     ok.
 
@@ -163,8 +163,8 @@ commit_transaction(TransactId, #db{by_id=IdBt,
 
     %% write the header
     NewHeader = OldHeader#db_header{tid=TransactId,
-                                    by_id=cowdb_btree:get_state(IdBt),
-                                    log=cowdb_btree:get_state(LogBt)},
+                                    by_id=cbt_btree:get_state(IdBt),
+                                    log=cbt_btree:get_state(LogBt)},
     ok = cowdb_util:write_header(NewHeader, Db),
     {ok, Db#db{tid=TransactId, header=NewHeader}}.
 

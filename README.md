@@ -30,10 +30,7 @@ history is lost during the transaction.
 
 ## Usage
 
-Look at the [`cowdb`](http://github.com/refuge/cowdb/blob/master/doc/cowdb.md) module for the API usage.
-
-Full documentation is available here:
-https://wiki.refuge.io/display/COWDB/CowDB+Documentation+Home
+Look at the [`cowdb`](http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb.md) module for the API usage.
 
 main CowDB website is http://cowdb.org
 
@@ -127,16 +124,13 @@ To  run the test suite:
     $ make test
 ```
 
+##  Modules
 
 
 ## Modules ##
 
 
 <table width="100%" border="0" summary="list of modules">
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb.md" class="module">cowdb</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_btree.md" class="module">cowdb_btree</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_btree_copy.md" class="module">cowdb_btree_copy</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_compress.md" class="module">cowdb_compress</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_file.md" class="module">cowdb_file</a></td></tr>
-<tr><td><a href="http://github.com/refuge/cowdb/blob/master/doc/cowdb_util.md" class="module">cowdb_util</a></td></tr></table>
+<tr><td><a href="http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb.md" class="module">cowdb</a></td></tr>
+<tr><td><a href="http://github.com/refuge/cowdb/blob/feature/multi-kvstore/doc/cowdb_util.md" class="module">cowdb_util</a></td></tr></table>
 

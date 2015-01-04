@@ -30,9 +30,6 @@ read-modify-update processing, and integrity constraints.
 
 Look at the {@link cowdb} module for the API usage.
 
-Full documentation is available here:
-https://wiki.refuge.io/display/COWDB/CowDB+Documentation+Home
-
 main CowDB website is http://cowdb.org
 
 ## Build process
@@ -124,3 +121,6 @@ To  run the test suite:
 ```
     $ make test
 '''
+
+##  Modules
+

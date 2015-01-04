@@ -8,11 +8,11 @@
 {application, cowdb,
  [
   {description, "copy-on-write database"},
-  {vsn, "0.4.1"},
+  {vsn, "0.4.2"},
   {registered, []},
   {applications, [
                   kernel,
                   stdlib
                  ]},
-  {env, []}
+  {included_applications, [cbt]}
  ]}.

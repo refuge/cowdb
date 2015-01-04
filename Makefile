@@ -4,7 +4,11 @@ ERLC ?= $(shell which erlc)
 ESCRIPT ?= $(shell which escript)
 ERL ?= $(shell which erl)
 APP := cowdb
-REBAR?= rebar
+REBAR ?= $(shell which rebar)
+
+.PHONY: deps
+
+$(if $(REBAR),,$(warning "Warning: rebar not found in your path"))
 
 $(if $(ERLC),,$(warning "Warning: No Erlang found in your path, this will probably not work"))
 

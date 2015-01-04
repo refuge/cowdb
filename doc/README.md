@@ -32,9 +32,6 @@ history is lost during the transaction.
 
 Look at the [`cowdb`](cowdb.md) module for the API usage.
 
-Full documentation is available here:
-https://wiki.refuge.io/display/COWDB/CowDB+Documentation+Home
-
 main CowDB website is http://cowdb.org
 
 ## Build process
@@ -127,6 +124,7 @@ To  run the test suite:
     $ make test
 ```
 
+##  Modules
 
 
 ## Modules ##
@@ -134,9 +132,5 @@ To  run the test suite:
 
 <table width="100%" border="0" summary="list of modules">
 <tr><td><a href="cowdb.md" class="module">cowdb</a></td></tr>
-<tr><td><a href="cowdb_btree.md" class="module">cowdb_btree</a></td></tr>
-<tr><td><a href="cowdb_btree_copy.md" class="module">cowdb_btree_copy</a></td></tr>
-<tr><td><a href="cowdb_compress.md" class="module">cowdb_compress</a></td></tr>
-<tr><td><a href="cowdb_file.md" class="module">cowdb_file</a></td></tr>
 <tr><td><a href="cowdb_util.md" class="module">cowdb_util</a></td></tr></table>
 

@@ -22,8 +22,8 @@
 %% compaction util export
 -export([init_db/6]).
 
-
 -include("cowdb.hrl").
+-include_lib("cbt/include/cbt.hrl").
 
 -type trans_type() :: version_change | update.
 -export_type([trans_type/0]).
@@ -171,9 +171,9 @@ apply_op(Req, From, Db) ->
             ok;
         {compact_done, CompactFile} ->
             #db{fd=Fd, reader_fd=ReaderFd, file_path=FilePath}=Db,
-            {ok, NewFd} = cowdb_file:open(CompactFile),
-            {ok, NewReaderFd} = cowdb_file:open(CompactFile, [read_only]),
-            {ok, NewHeader, _Pos} = cowdb_file:read_header(NewFd),
+            {ok, NewFd} = cbt_file:open(CompactFile),
+            {ok, NewReaderFd} = cbt_file:open(CompactFile, [read_only]),
+            {ok, NewHeader, _Pos} = cbt_file:read_header(NewFd),
             #db{tid=Tid} = NewDb = cowdb_util:init_db(NewHeader, Db#db.db_pid,
                                                       NewFd, NewReaderFd,
                                                       FilePath,
@@ -187,18 +187,18 @@ apply_op(Req, From, Db) ->
 
                     %% we are now ready to switch the file
                     %% prevent write to the old file
-                    cowdb_file:close(Fd),
+                    cbt_file:close(Fd),
 
                     %% rename the old file path
                     OldFilePath = FilePath ++ ".old",
-                    cowdb_file:rename(ReaderFd, OldFilePath),
+                    cbt_file:rename(ReaderFd, OldFilePath),
 
                     %% rename the compact file
-                    cowdb_file:rename(NewFd, FilePath),
+                    cbt_file:rename(NewFd, FilePath),
                     gen_server:call(NewReaderFd, {set_path, FilePath},
                                     infinity),
-                    cowdb_file:sync(NewFd),
-                    cowdb_file:sync(NewReaderFd),
+                    cbt_file:sync(NewFd),
+                    cbt_file:sync(NewReaderFd),
 
                     %% now delete the old file
                     cowdb_util:delete_file(OldFilePath),
@@ -207,8 +207,8 @@ apply_op(Req, From, Db) ->
                     From ! {self(), ok},
                     NewDb;
                 false ->
-                    cowdb_file:close(NewFd),
-                    cowdb_file:close(NewReaderFd),
+                    cbt_file:close(NewFd),
+                    cbt_file:close(NewReaderFd),
                     From ! {self(), {retry, Db}},
                     Db
             end;
@@ -234,8 +234,8 @@ apply_op(Req, From, Db) ->
     end.
 
 do_stop(#db{fd=Fd, reader_fd=ReaderFd}) ->
-    ok = cowdb_file:close(Fd),
-    ok = cowdb_file:close(ReaderFd),
+    ok = cbt_file:close(Fd),
+    ok = cbt_file:close(ReaderFd),
     ok.
 
 
@@ -248,19 +248,19 @@ do_open_db(FilePath, Options, DbPid) ->
 
 
     %% open the writer fd
-    case cowdb_file:open(FilePath, OpenOptions) of
+    case cbt_file:open(FilePath, OpenOptions) of
         {ok, Fd} ->
             %% open the the reader file
-            {ok, ReaderFd} = cowdb_file:open(FilePath, [read_only]),
+            {ok, ReaderFd} = cbt_file:open(FilePath, [read_only]),
             process_flag(trap_exit, true),
 
             %% open the header or initialize it.
-            Header = case cowdb_file:read_header(Fd) of
+            Header = case cbt_file:read_header(Fd) of
                 {ok, Header1, _Pos} ->
                     Header1;
                 no_valid_header ->
                     Header1 = #db_header{},
-                    {ok, _} = cowdb_file:write_header(Fd, Header1),
+                    {ok, _} = cbt_file:write_header(Fd, Header1),
                     Header1
             end,
             %% initialize the database.
@@ -283,7 +283,7 @@ init_db(Header, DbPid, Fd, ReaderFd, FilePath, Options) ->
             Transaction = {0, #transaction{by_id=nil,
                                            ops=[],
                                            ts= cowdb_util:timestamp()}},
-            {ok, LogBt2} = cowdb_btree:add(LogBt, [Transaction]),
+            {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
             cowdb_util:commit_transaction(0, Db#db{log=LogBt2});
         {false, undefined} ->
             {ok, Db};
@@ -339,15 +339,15 @@ handle_transaction(TransactId, OPs, Timeout, Db) ->
 %% we don't try to edit in-place, instead we take
 %% the latest known header and append it to the database file
 rollback_transaction(#db{fd=Fd, header=Header}) ->
-    ok= cowdb_file:sync(Fd),
-    {ok, _Pos} = cowdb_file:write_header(Fd, Header),
-    ok= cowdb_file:sync(Fd),
+    ok= cbt_file:sync(Fd),
+    {ok, _Pos} = cbt_file:write_header(Fd, Header),
+    ok= cbt_file:sync(Fd),
     ok.
 
 run_transaction([], {ToAdd, ToRem}, Log0, TransactId, Ts,
                 #db{by_id=IdBt, log=LogBt}=Db) ->
     %% we atomically store the transaction.
-    {ok, Found, IdBt2} = cowdb_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
+    {ok, Found, IdBt2} = cbt_btree:query_modify(IdBt, ToRem, ToAdd, ToRem),
 
     RemValues = [{RemKey, {RemKey, RemPointer, TransactId, Ts}}
                  || {ok, {_, {RemKey, RemPointer, _, _}}} <- Found],
@@ -369,16 +369,16 @@ run_transaction([], {ToAdd, ToRem}, Log0, TransactId, Ts,
 
     %% store the new log
     Transaction = {TransactId, #transaction{tid=TransactId,
-                                            by_id=cowdb_btree:get_state(IdBt2),
+                                            by_id=cbt_btree:get_state(IdBt2),
                                             ops=lists:reverse(Log),
                                             ts=Ts}},
-    {ok, LogBt2} = cowdb_btree:add(LogBt, [Transaction]),
+    {ok, LogBt2} = cbt_btree:add(LogBt, [Transaction]),
     {ok, Db#db{by_id=IdBt2, log=LogBt2}};
 run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, Log, TransactId,
                 Ts, #db{fd=Fd}=Db) ->
     %% we are storing the value directly in the file, the btree will
     %% only keep a reference so we don't have the value multiple time.
-    {ok, Pos, Size} = cowdb_file:append_term_crc32(Fd, Value),
+    {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
     Value1 =  {Key, {Pos, Size}, TransactId, Ts},
     run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem},
                     [{add, Value1} | Log],  TransactId, Ts, Db);
@@ -431,5 +431,5 @@ req(Proc, R) ->
 maybe_compact(#db{auto_compact=false}) ->
     false;
 maybe_compact(#db{fd=Fd, compact_limit=Limit}) ->
-    Size = cowdb_file:bytes(Fd),
+    Size = cbt_file:bytes(Fd),
     Size >= Limit.

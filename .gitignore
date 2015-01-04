@@ -9,4 +9,5 @@ doc/*.css
 doc/erlang.png
 doc/edoc-info
 .eunit
+.rebar
 test/temp
