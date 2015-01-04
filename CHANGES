@@ -1,6 +1,18 @@
 Changelog of cowdb
 ------------------
 
+0.4.2 - 2014/01/04
+
+- Internally uses the CBT library for all of our btree usages.
+- fix: handle duplicate keys in transactions (#4)
+
+0.4.1 - 2014/08/17
+
+- New license. CowDB is now released under the Mozilla Public License v2.0
+- cowdb now uses the C4.1 (Collective Code Construction Contract) process for
+contributions.
+- move code from bitbucket to github.
+
 0.4.0 - 2014/06/30
 
 - rename cowdb:db_info/1 to cowdb:database_info/1

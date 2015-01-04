@@ -64,7 +64,9 @@ basic_ops_test_() ->
                 fun should_fold_range/1,
                 fun should_cancel_transact_fun/1,
                 fun should_error_transact_fun/1,
-                fun shoudl_catch_transact_fun_error/1
+                fun shoudl_catch_transact_fun_error/1,
+                fun should_handle_duplicate_kvs/1,
+                fun should_handle_delete_with_duplicate_keys/1
         ])
     }.
 
@@ -250,3 +252,18 @@ shoudl_catch_transact_fun_error(Db) ->
     end,
     Reply = cowdb:transact(Db,  [{fn, TransactFun}]),
     ?_assertMatch(badarg, Reply).
+
+
+should_handle_duplicate_kvs(Db) ->
+    {ok, Tx} = cowdb:transact(Db, [{add, a, 1},
+                                   {add, a, 3}]),
+    ?assertEqual(1, Tx),
+    ?_assertMatch([{ok, {a, 3}}], cowdb:mget(Db, [a])).
+
+should_handle_delete_with_duplicate_keys(Db) ->
+    {ok, 1} = cowdb:mput(Db,  [{a, 1}, {b, 2}, {c, 3}]),
+    ?assertMatch([{ok, {a, 1}}, {ok, {b, 2}}, {ok, {c, 3}}],
+                  cowdb:mget(Db, [a, b, c])),
+    {ok, 2} = cowdb:mdelete(Db, [a, a, b, c]),
+    ?_assertMatch([not_found, not_found, not_found],
+                  cowdb:mget(Db, [a, b, c])).

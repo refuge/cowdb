@@ -380,12 +380,21 @@ run_transaction([{add, Key, Value} | Rest], {ToAdd, ToRem}, Log, TransactId,
     %% only keep a reference so we don't have the value multiple time.
     {ok, Pos, Size} = cbt_file:append_term_crc32(Fd, Value),
     Value1 =  {Key, {Pos, Size}, TransactId, Ts},
-    run_transaction(Rest, {[{Key, Value1} | ToAdd], ToRem},
+    %% make sure to replace duplicates
+    ToAdd2 = lists:keystore(Key, 1, ToAdd, {Key, Value1}),
+    run_transaction(Rest, {ToAdd2, ToRem},
                     [{add, Value1} | Log],  TransactId, Ts, Db);
-run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, Log, TransactId, Ts, Db) ->
-    %% remove a key
-    run_transaction(Rest, {ToAdd, [Key | ToRem]}, [{remove, Key} | Log],
-                    TransactId, Ts, Db);
+run_transaction([{remove, Key} | Rest], {ToAdd, ToRem}, Log, TransactId, Ts,
+                Db) ->
+    case lists:member(Key, ToRem) of
+        true ->
+            %% duplicate, continue
+            run_transaction(Rest, {ToAdd, ToRem}, Log, TransactId, Ts, Db);
+        false ->
+            %% remove a key
+            run_transaction(Rest, {ToAdd, [Key | ToRem]}, [{remove, Key} | Log],
+                            TransactId, Ts, Db)
+    end;
 run_transaction([{fn, Func} | Rest], AddRemove, Log, TransactId, Ts, Db) ->
     %% execute a transaction function
     case cowdb_util:apply(Func, [Db]) of
