@@ -228,9 +228,6 @@ lookup(DbPid, Keys) ->
 
 %% @doc get a list of objects by the specified key
 -spec mget(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.
-mget(DbPid, Keys) when is_pid(DbPid) ->
-    Db = gen_server:call(DbPid, get_db, infinity),
-    mget(Db, Keys);
 mget(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
     Results = cbt_btree:lookup(IdBt#btree{ref=Fd}, Keys),
     lists:foldr(fun
@@ -239,7 +236,10 @@ mget(#db{reader_fd=Fd, by_id=IdBt}, Keys) ->
                 [{ok, {Key, Val}} | Acc];
             (Else, Acc) ->
                 [Else | Acc]
-        end, [], Results).
+        end, [], Results);
+mget(DbPidOrName, Keys) when ->
+    Db = gen_server:call(DbPidOrName, get_db, infinity),
+    mget(Db, Keys).
 
 %% @doc fold all objects form the database
 -spec fold(db(), fun(), any()) -> {ok, any(), any()} | {error, term()}.
