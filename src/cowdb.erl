@@ -16,6 +16,7 @@
          count/1,
          data_size/1,
          get/2,
+         get/3,
          mget/2,
          lookup/2,
          put/2, put/3,
@@ -215,10 +216,19 @@ data_size(#db{by_id=IdBt, log=LogBt}) ->
     {ok, TotalSize}.
 
 %% @doc get an object by the specified key
--spec get(Db::db(), Key::any()) -> {ok, any()} | {error, term()}.
+-spec get(Db::db(), Key::any()) -> {ok, any()} | not_found.
 get(Db, Key) ->
     [Val] = mget(Db, [Key]),
     Val.
+
+%% @doc get a value by the specified key.
+%% Returns `Default' value if the object with the given key is not found.
+-spec get(Db::db(), Key::any(), Default::any()) -> Value::any().
+get(Db, Key, Default) ->
+    case mget(Db, [Key]) of
+        [not_found]    -> Default;
+        [{ok,{_,Val}}] -> Val
+    end.
 
 %% @doc deprecated: use mget/2 instead.
 -spec lookup(Db::db(), Keys::[any()]) -> {ok, any()} | {error, term()}.

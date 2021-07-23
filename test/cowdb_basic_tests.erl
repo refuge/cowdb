@@ -75,7 +75,9 @@ should_create_kv(Db) ->
 
 should_read_kv(Db) ->
     {ok, 1} = cowdb:put(Db, a, 1),
-    ?_assertMatch({ok, {a, 1}}, cowdb:get(Db, a)).
+    ?_assertMatch({ok, {a, 1}}, cowdb:get(Db, a)),
+    ?_assertMatch(1, cowdb:get(Db, a, 0)),
+    ?_assertMatch(2, cowdb:get(Db, b, 2)).
 
 should_create_kv_tuple(Db) ->
     ?_assertMatch({ok, 1}, cowdb:put(Db, {a, 1})).
